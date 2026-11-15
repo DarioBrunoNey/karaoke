@@ -23,7 +23,7 @@ const LIVE_COLOR: Record<LiveState, string> = { none: 'text-white/40', silent: '
 const LEAD = 3 // Sekunden Vorlauf vor einem Abschnitt
 /** Ein Abschnitt, den ein bestimmter Sänger singt */
 interface Round { pid: string; s: number; e: number; label: string }
-const usKey = (id: string) => 'encore-us2-' + id
+const usKey = (id: string) => 'encore-us3-' + id
 
 /**
  * Spotify-Modus: Spotify spielt die Originalaufnahme, die App zeigt den Text synchron und bewertet die Stimme.

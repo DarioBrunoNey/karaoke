@@ -129,24 +129,36 @@ const lnorm = (x: string) => x.toLowerCase().replace(/[^a-z0-9äöüß]/g, '')
 export function consensus(cands: { lines: LyricLine[]; exact?: boolean }[]): { lines: LyricLine[]; support: number } | null {
   if (!cands.length) return null
   const sig = cands.map((c) => { const m = new Map<string, number>(); for (const l of c.lines) { const k = lnorm(l.text).slice(0, 14); if (k.length >= 6 && !m.has(k)) m.set(k, l.t) } return m })
-  let best = 0, bestScore = -1
-  cands.forEach((c, i) => {
-    let support = 0
-    sig.forEach((other, j) => {
-      if (i === j) return
-      const d: number[] = []
-      for (const [k, t] of sig[i]) { const o = other.get(k); if (o !== undefined) d.push(Math.abs(t - o)) }
-      if (d.length >= 4) { d.sort((x, y) => x - y); if (d[d.length >> 1] <= 0.4) support++ }
-    })
-    const score = support + (c.exact ? 0.5 : 0)
-    if (score > bestScore) { bestScore = score; best = i }
+  // agree[i][j]: Fassung j bestätigt Fassung i (Zeilenzeiten im Mittel ≤ 0,4 s auseinander)
+  const agree = cands.map((_, i) => cands.map((__, j) => {
+    if (i === j) return false
+    const d: number[] = []
+    for (const [k, t] of sig[i]) { const o = sig[j].get(k); if (o !== undefined) d.push(Math.abs(t - o)) }
+    if (d.length < 4) return false
+    d.sort((x, y) => x - y)
+    return d[d.length >> 1] <= 0.4
+  }))
+  const support = agree.map((row) => row.filter(Boolean).length)
+  // Normalfall: Mehrheit. Wird aber die Fassung, die exakt zu Album und Länge des Spotify-Titels gehört,
+  // von mindestens einer weiteren bestätigt, gilt ihre Gruppe – verschiedene Pressungen beginnen unterschiedlich.
+  const ex = cands.findIndex((c) => c.exact)
+  let pool = cands.map((_, i) => i)
+  if (ex >= 0 && support[ex] >= 1) pool = pool.filter((i) => i === ex || agree[ex][i])
+  let best = pool[0]
+  for (const i of pool) if (support[i] > support[best]) best = i
+  // Zeiten glätten: je Zeile der Median aller Fassungen derselben Gruppe mit gleichem Zeilenaufbau
+  const base = cands[best].lines
+  const mates = cands.filter((c, j) => (j === best || agree[best][j]) && c.lines.length === base.length && c.lines.every((l, k) => lnorm(l.text).slice(0, 8) === lnorm(base[k].text).slice(0, 8)))
+  const lines = base.map((l, k) => {
+    const ts = mates.map((m) => m.lines[k].t).sort((x, y) => x - y)
+    return { ...l, t: ts.length >= 3 ? ts[ts.length >> 1] : l.t }
   })
-  return { lines: cands[best].lines, support: Math.floor(bestScore) }
+  return { lines, support: support[best] }
 }
 
 /** Synchronen Liedtext aus LRCLIB holen; unter den Fassungen passender Länge entscheidet die Mehrheit. */
 export async function lyricsFor(t: SpTrack): Promise<{ lines: LyricLine[]; plain: string; diff: number }> {
-  const key = 'encore-lyr4-' + t.id
+  const key = 'encore-lyr5-' + t.id
   try { const c = JSON.parse(localStorage.getItem(key) || 'null'); if (c) return c } catch { /* neu laden */ }
   const artist = t.artists.split(',')[0]
   const title = t.name.replace(/\s+-\s+.*(remaster|version|edit|mix|live).*$/i, '').replace(/\s*\((feat|with|remaster)[^)]*\)/gi, '')

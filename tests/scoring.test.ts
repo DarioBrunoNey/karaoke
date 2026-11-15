@@ -136,3 +136,15 @@ import { parseUltraStar, syllableProgress } from '../src/lib/ultrastar.ts'
   assert.deepEqual(sec.map((x) => x.label), ['Strophe 1', 'Refrain', 'Strophe 2', 'Refrain'])
   assert.equal(sec[1].from, 4); assert.equal(sec[1].to, 5)
 }
+{
+  // Textfassungen: Mehrheit gewinnt, die exakt passende Fassung zieht ihre Gruppe vor, Zeiten werden gemittelt
+  const { consensus } = await import('../src/spotify/api.ts')
+  const mk = (off: number, jit: number[]) => ({ lines: ['Erste Zeile hier', 'Zweite Zeile dort', 'Dritte Zeile dann', 'Vierte Zeile noch', 'Fuenfte Zeile zuletzt'].map((text, k) => ({ t: 10 + k * 5 + off + (jit[k] ?? 0), text })) })
+  const major = [mk(0, [0.3, 0, 0, 0, 0]), mk(0, [0, 0, 0.2, 0, 0]), mk(0, [-0.3, 0, 0, 0, 0]), mk(0, [])]
+  const minor = [mk(2, []), { ...mk(2, [0.1]), exact: true }]
+  const a = consensus([...minor.map((m) => ({ lines: m.lines })), ...major])!
+  assert.ok(Math.abs(a.lines[0].t - 10) < 0.05, 'Mehrheit + Median: ' + a.lines[0].t)
+  const b = consensus([...minor, ...major])!
+  assert.ok(Math.abs(b.lines[1].t - 17) < 0.05, 'exakte Fassung mit Bestätigung: ' + b.lines[1].t)
+  console.log('Textfassungen OK')
+}
