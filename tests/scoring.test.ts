@@ -124,3 +124,15 @@ import { parseUltraStar, syllableProgress } from '../src/lib/ultrastar.ts'
   assert.equal(alignFit(us, words.map((text, k) => ({ t: k * 7 + (k * k) % 13, text: 'ganz anderer text ' + k }))), null)
   console.log('Ausrichtung OK')
 }
+{
+  const { findSections } = await import('../src/lib/sections.ts')
+  // 2 Strophen à 4 Zeilen, dazwischen und danach derselbe Refrain (2 Zeilen), Pausen von 6 s zwischen den Teilen
+  const L: { t: number; e: number; text: string }[] = []
+  let t = 10
+  const add = (texts: string[]) => { for (const text of texts) { L.push({ t, e: t + 2.5, text }); t += 3 } t += 6 }
+  add(['Erste Strophe eins', 'zwei', 'drei', 'vier']); add(['Das ist der Refrain', 'und noch einmal']); add(['Zweite Strophe eins', 'zwei', 'drei', 'vier']); add(['Das ist der Refrain', 'und noch einmal'])
+  const sec = findSections(L)
+  console.log('Abschnitte:', sec.map((x) => x.label).join(', '))
+  assert.deepEqual(sec.map((x) => x.label), ['Strophe 1', 'Refrain', 'Strophe 2', 'Refrain'])
+  assert.equal(sec[1].from, 4); assert.equal(sec[1].to, 5)
+}

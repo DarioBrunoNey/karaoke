@@ -5,6 +5,7 @@ import { lineAt } from '../lib/lrc'
 import { midiToName } from '../lib/pitch'
 import { ScoreSession, lineVerdict, type LiveState } from '../lib/scoring'
 import { estimateWords } from '../lib/words'
+import { findSections, type Section } from '../lib/sections'
 import { freeScore } from '../lib/freeScore'
 import { parseUltraStar, syllableProgress, type UsLine, type UsSong } from '../lib/ultrastar'
 import type { LyricLine, ScoreResult, SpTrack } from '../lib/types'
@@ -19,6 +20,9 @@ type Phase = 'mic' | 'loading' | 'ready' | 'ended' | 'error'
 const FPS = 50
 const LIVE_LABEL: Record<LiveState, string> = { none: '', silent: 'Sing!', hit: 'Treffer', high: 'Zu hoch', low: 'Zu tief' }
 const LIVE_COLOR: Record<LiveState, string> = { none: 'text-white/40', silent: 'text-white/60', hit: 'text-emerald-300', high: 'text-sky-300', low: 'text-pink' }
+const LEAD = 3 // Sekunden Vorlauf vor einem Abschnitt
+/** Ein Abschnitt, den ein bestimmter Sänger singt */
+interface Round { pid: string; s: number; e: number; label: string }
 const usKey = (id: string) => 'encore-us2-' + id
 
 /**
@@ -67,15 +71,35 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   const [verdict, setVerdict] = useState<{ text: string; n: number } | null>(null)
   const hasRef = !!us
 
-  // Neue Wertung beginnen, sobald feststeht, womit verglichen wird
-  useEffect(() => {
+  // Mehrspieler / einzelne Abschnitte: Ablaufplan und je Sänger eine eigene Wertung
+  const [plan, setPlan] = useState<Round[] | null>(null)
+  const planRef = useRef<Round[] | null>(null)
+  const ri = useRef(0)
+  const [turn, setTurn] = useState<{ pid: string; label: string; next: string }>({ pid: profileId, label: '', next: '' })
+  const turnPid = useRef(profileId)
+  const sessions = useRef(new Map<string, ScoreSession>())
+  const [showMode, setShowMode] = useState(false)
+  const [multi, setMulti] = useState<{ pid: string; r: ScoreResult }[] | null>(null)
+  const sections = useMemo(() => findSections(lines.map((l, i) => ({ t: l.t, e: pages[i].e, text: l.text }))), [lines, pages])
+
+  const melodyData = useMemo(() => {
     const len = Math.ceil((track.durationMs / 1000) * FPS)
     const data = new Float32Array(len)
     if (us) data.set(us.melody.subarray(0, len))
-    session.current = new ScoreSession({ fps: FPS, data, source: 'stems' })
-    const voiced = data.filter((x) => x > 0)
-    if (voiced.length) center.current = voiced[voiced.length >> 1]
+    return data
   }, [us, track.durationMs])
+  const sessFor = useCallback((pid: string) => {
+    let s = sessions.current.get(pid)
+    if (!s) { s = new ScoreSession({ fps: FPS, data: melodyData, source: 'stems' }); sessions.current.set(pid, s) }
+    return s
+  }, [melodyData])
+  // Neue Wertung beginnen, sobald feststeht, womit verglichen wird
+  useEffect(() => {
+    sessions.current = new Map()
+    session.current = sessFor(turnPid.current)
+    const voiced = melodyData.filter((x) => x > 0)
+    if (voiced.length) center.current = voiced[voiced.length >> 1]
+  }, [melodyData, sessFor])
 
   const startMic = useCallback(async (mode: MicMode | 'off') => {
     if (mode === 'off') { mic.stop(); setMicOn(false); return }
@@ -132,16 +156,22 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
     const t = tr.current
     t?.destroy(); tr.current = null
     const s = session.current
-    if (p.current.micOn && s) {
-      const r = hasRef ? s.result() : freeScore(s.user, FPS, lines)
+    const score = (x: ScoreSession) => (hasRef ? x.result() : freeScore(x.user, FPS, lines))
+    const pl = planRef.current
+    const pids = pl ? [...new Set(pl.map((r) => r.pid))] : []
+    if (p.current.micOn && pids.length > 1) {
+      setMulti(pids.map((pid) => ({ pid, r: score(sessFor(pid)) })).sort((a, b) => b.r.total - a.r.total))
+    } else if (p.current.micOn && s) {
+      const r = score(s)
+      const who = profiles.find((x) => x.id === turnPid.current)
       let rank: number | undefined
-      if (r.valid && profile) {
-        rank = await addScore({ songId: 'sp:' + track.id, songTitle: track.name, artist: track.artists, profileId, profileName: profile.name, total: r.total, accuracy: r.accuracy, stars: r.stars, award: r.award.title })
+      if (r.valid && who && !pl) {
+        rank = await addScore({ songId: 'sp:' + track.id, songTitle: track.name, artist: track.artists, profileId: who.id, profileName: who.name, total: r.total, accuracy: r.accuracy, stars: r.stars, award: r.award.title })
       }
       setResult({ r, rank, withRef: hasRef })
     }
     setPhase('ended')
-  }, [hasRef, lines, profile, addScore, track, profileId])
+  }, [hasRef, lines, profiles, addScore, track, sessFor])
   const finishRef = useRef(finish)
   finishRef.current = finish
 
@@ -150,11 +180,34 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
     let raf = 0, idx = -2, lastUi = 0, started = false, prev = 0
     const loop = (now: number) => {
       raf = requestAnimationFrame(loop)
-      const t = tr.current, s = session.current
-      if (!t || !s) return
+      const t = tr.current
+      if (!t || !session.current) return
       const pos = t.time(), dur = t.duration()
       const lt = pos - p.current.offset
-      if (p.current.micOn && !t.paused()) {
+      // Ablaufplan: Abschnitt zu Ende → nächster Sänger bzw. Schluss
+      const pl = planRef.current
+      let active = true
+      if (pl) {
+        let r = pl[ri.current]
+        // läuft der nächste Abschnitt direkt weiter (Mikro weitergeben), kurz vor dessen Beginn umschalten
+        const nx = pl[ri.current + 1]
+        const until = nx && nx.s >= r.e ? Math.min(r.e + 0.6, Math.max(r.e, nx.s - 0.3)) : r.e + 0.6
+        if (lt > until && pos > 0.5) {
+          ri.current++
+          if (ri.current >= pl.length) { cancelAnimationFrame(raf); void finishRef.current(); return }
+          r = pl[ri.current]
+          turnPid.current = r.pid
+          session.current = sessFor(r.pid)
+          liveRef.current = { state: 'none', midi: 0, level: 0 }
+          // nur springen, wenn der Abschnitt weit voraus liegt oder schon begonnen hat (Duell: zurück an den Anfang)
+          if (lt < r.s - LEAD - 1.5 || lt > r.s + 0.3) void t.seek(Math.max(0, r.s - LEAD + p.current.offset))
+          setTurn({ pid: r.pid, label: r.label, next: '' })
+          return
+        }
+        active = lt >= r.s - 0.5
+      }
+      const s = session.current
+      if (p.current.micOn && !t.paused() && active) {
         const smp = mic.sample()
         const st = s.add(lt - p.current.micOffset, smp.voiced ? smp.midi : 0)
         liveRef.current = { state: st, midi: smp.voiced ? smp.midi : 0, level: smp.level }
@@ -176,12 +229,17 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
         lastUi = now
         setPaused(t.paused()); if (t.kind === 'remote') setDevice(t.deviceName)
         const l = liveRef.current
+        if (pl) {
+          const r = pl[ri.current], nx = pl[ri.current + 1]
+          const soon = nx && nx.pid !== r.pid && lt > r.e - 3 ? nx.pid : ''
+          setTurn((cur) => (cur.next === soon ? cur : { ...cur, next: soon }))
+        }
         if (p.current.micOn) setLive({ score: (hasRef ? s.result() : freeScore(s.user, FPS, lines)).total, state: l.state, note: l.midi ? midiToName(l.midi) : '', level: l.level })
       }
     }
     raf = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(raf)
-  }, [phase, lines, hasRef, pages])
+  }, [phase, lines, hasRef, pages, sessFor])
 
   const toggle = useCallback(() => { void tr.current?.toggle().catch(() => {}) }, [])
   const fullscreen = () => { if (document.fullscreenElement) void document.exitFullscreen(); else void document.documentElement.requestFullscreen?.().catch(() => {}) }
@@ -190,6 +248,26 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   const chooseMic = (mode: MicMode | 'off') => {
     setSettings({ micMode: mode, micAsked: true }); setShowMic(false)
     if (phase === 'mic') setPhase('loading'); else void startMic(mode)
+  }
+  /** Startet einen Ablauf: wer singt, welcher Teil, abwechselnd oder als Duell */
+  const startMode = (pids: string[], part: Section | null, style: 'pass' | 'duel') => {
+    const t = tr.current
+    if (!t || !pids.length) return
+    let rounds: Round[] | null = null
+    const whole = { s: sections[0]?.s ?? 0, e: sections[sections.length - 1]?.e ?? track.durationMs / 1000 - 1 }
+    if (pids.length === 1) rounds = part ? [{ pid: pids[0], s: part.s, e: part.e, label: part.label }] : null
+    else if (style === 'duel') rounds = pids.map((pid) => ({ pid, s: (part ?? whole).s, e: (part ?? whole).e, label: part?.label ?? 'Ganzer Song' }))
+    else if (part) rounds = pages.slice(part.from, part.to + 1).map((pg, k) => ({ pid: pids[k % pids.length], s: pg.t, e: pg.e, label: part.label }))
+    else rounds = sections.map((sec, k) => ({ pid: pids[k % pids.length], s: sec.s, e: sec.e, label: sec.label }))
+    if (rounds && !rounds.length) rounds = null
+    // direkt aufeinanderfolgende Zeilen desselben Abschnitts lückenlos machen (Mikro weitergeben ohne Sprung)
+    planRef.current = rounds; setPlan(rounds); ri.current = 0
+    sessions.current = new Map()
+    turnPid.current = pids[0]
+    session.current = sessFor(pids[0])
+    setTurn({ pid: pids[0], label: rounds?.[0].label ?? '', next: '' })
+    setResult(null); setMulti(null); setShowMode(false)
+    void t.seek(Math.max(0, (rounds ? rounds[0].s - LEAD : 0) + offset)).then(() => { if (t.paused()) void t.toggle() })
   }
   const applyMelody = (text: string | null) => {
     if (text === null) { localStorage.setItem(usKey(track.id), '-'); setUs(null); setNotes('none'); setShowMelody(false); return }
@@ -202,7 +280,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
 
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || showMic || showMelody) return
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || showMic || showMelody || showMode) return
       const t = tr.current
       if (e.code === 'Space') { e.preventDefault(); toggle() }
       else if (e.key === 'f' || e.key === 'F') fullscreen()
@@ -212,7 +290,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
     }
     window.addEventListener('keydown', k)
     return () => window.removeEventListener('keydown', k)
-  }, [toggle, leave, showMic, showMelody])
+  }, [toggle, leave, showMic, showMelody, showMode])
 
   useEffect(() => {
     let timer = 0
@@ -223,7 +301,10 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
     return () => { clearTimeout(timer); for (const ev of evs) window.removeEventListener(ev, wake) }
   }, [])
 
-  const hideUi = idle && phase === 'ready' && !paused && !showMic && !showMelody
+  const hideUi = idle && phase === 'ready' && !paused && !showMic && !showMelody && !showMode
+  const singer = profiles.find((x) => x.id === turn.pid) ?? profile
+  const upNext = turn.next ? profiles.find((x) => x.id === turn.next) : undefined
+  const many = !!plan && new Set(plan.map((r) => r.pid)).size > 1
   const cur = lineIdx >= 0 ? lines[lineIdx] : null
   const next = queue[0]
   const nextTitle = next && (next.spotify?.name ?? songs.find((s) => s.id === next.songId)?.title)
@@ -247,7 +328,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
         </div>
         <div className="flex shrink-0 items-center gap-3">
           <div className="hidden items-center gap-2 rounded-full bg-white/10 py-1.5 pl-1.5 pr-4 font-semibold sm:flex">
-            <span className="flex h-9 w-9 items-center justify-center rounded-full font-black text-black" style={{ background: profile?.color }}>{profile?.name.slice(0, 1).toUpperCase()}</span>{profile?.name}
+            <span className="flex h-9 w-9 items-center justify-center rounded-full font-black text-black" style={{ background: singer?.color }}>{singer?.name.slice(0, 1).toUpperCase()}</span>{singer?.name}
           </div>
           {micOn && phase === 'ready' && (
             <div className="text-right">
@@ -258,6 +339,13 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
         </div>
       </div>
 
+      {phase === 'ready' && plan && (
+        <div className="pointer-events-none relative z-10 flex flex-wrap items-center justify-center gap-3 px-4">
+          <span data-testid="turn" className="rounded-full px-5 py-2 text-xl font-black text-black shadow-xl sm:text-2xl" style={{ background: singer?.color }}>{many ? `Am Mikro: ${singer?.name}` : turn.label || 'Abschnitt'}</span>
+          {many && turn.label && <span className="rounded-full bg-white/10 px-4 py-2 font-semibold">{turn.label}</span>}
+          {upNext && <span key={upNext.id} className="pop rounded-full border-2 px-4 py-1.5 text-lg font-bold" style={{ borderColor: upNext.color, color: upNext.color }}>Gleich dran: {upNext.name}</span>}
+        </div>
+      )}
       <div className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center px-5 text-center sm:px-12">
         {phase === 'loading' && <div><div className="grad mx-auto h-20 w-20 rounded-full [animation:pulse-ring_1.4s_infinite]" /><p className="mt-8 text-2xl font-bold">Spotify wird gestartet …</p></div>}
         {phase === 'error' && (
@@ -274,11 +362,30 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
         )}
         {phase === 'ended' && (
           <div className="pop w-full max-w-2xl">
-            {result ? (
+            {multi ? (
+              <>
+                <p className="text-5xl">🏆</p>
+                <h1 className="grad-text mt-1 text-5xl font-black tracking-tight sm:text-6xl">{profiles.find((x) => x.id === multi[0].pid)?.name} gewinnt!</h1>
+                <p className="mt-1 text-lg text-white/60">{track.name}{plan?.[0].label && plan.every((r) => r.label === plan[0].label) ? ` · ${plan[0].label}` : ''}</p>
+                <ol className="mt-6 space-y-2 text-left">
+                  {multi.map((m, i) => {
+                    const who = profiles.find((x) => x.id === m.pid)
+                    return (
+                      <li key={m.pid} data-testid={`rank-${i + 1}`} className={`flex items-center gap-4 rounded-2xl border p-3 ${i === 0 ? 'border-white/40 bg-white/10' : 'border-white/10'}`}>
+                        <span className="w-8 text-center text-2xl font-black text-white/50">{['🥇', '🥈', '🥉'][i] ?? i + 1}</span>
+                        <span className="flex h-11 w-11 items-center justify-center rounded-full text-lg font-black text-black" style={{ background: who?.color }}>{who?.name.slice(0, 1).toUpperCase()}</span>
+                        <span className="min-w-0 flex-1"><span className="block truncate text-xl font-bold">{who?.name}</span><span className="text-sm text-white/50">{m.r.award.emoji} {m.r.award.title} · {hasRef ? 'Tonhöhe' : 'Tonsicherheit'} {m.r.parts.pitch} · Einsatz {m.r.parts.timing}</span></span>
+                        <span className="grad-text text-4xl font-black tabular-nums">{m.r.total}</span>
+                      </li>
+                    )
+                  })}
+                </ol>
+              </>
+            ) : result ? (
               <>
                 <p className="text-5xl">{result.r.award.emoji}</p>
                 <h1 className="grad-text mt-1 text-5xl font-black tracking-tight sm:text-6xl">{result.r.award.title}</h1>
-                <p className="mt-1 text-lg text-white/60">{profile?.name} · {track.name}</p>
+                <p className="mt-1 text-lg text-white/60">{singer?.name} · {track.name}{plan ? ` · ${plan[0].label}` : ''}</p>
                 <p className="mt-4 text-8xl font-black tabular-nums tracking-tighter" data-testid="total">{result.r.total}<span className="ml-2 text-2xl font-semibold tracking-normal text-white/40">/ 100</span></p>
                 <div className="mt-2 flex justify-center"><Stars value={result.r.stars} size={36} /></div>
                 <div className="mt-6 grid grid-cols-2 gap-x-6 gap-y-3 text-left sm:grid-cols-4">
@@ -291,7 +398,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
                 </div>
                 <p className="mt-4 text-sm text-white/50">
                   {result.withRef ? `${result.r.accuracy} % der gesungenen Töne getroffen` : `${result.r.accuracy} % deiner Töne passen in eine Tonart. Ohne Melodie-Datei misst die App Tonsicherheit und Timing – nicht, ob es die richtige Melodie war.`}
-                  {result.rank ? ` · Platz ${result.rank} bei diesem Song` : ''}{!result.r.valid ? ' · Nicht zu Ende gesungen – zählt nicht für die Bestenliste.' : ''}
+                  {result.rank ? ` · Platz ${result.rank} bei diesem Song` : ''}{plan ? ' · Einzelner Abschnitt – zählt nicht für die Bestenliste.' : !result.r.valid ? ' · Nicht zu Ende gesungen – zählt nicht für die Bestenliste.' : ''}
                 </p>
               </>
             ) : (
@@ -365,6 +472,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
             <div className="ml-auto flex flex-wrap items-center gap-2">
               {!hasRef && lines.length > 0 && diff >= 2 && <span className="hidden rounded-full bg-yellow-300/15 px-3 py-1.5 text-sm font-semibold text-yellow-200 xl:inline" title="Die gefundene Textfassung ist anders lang als die Spotify-Aufnahme">Text evtl. andere Fassung</span>}
               <span className="hidden rounded-full bg-emerald-400/15 px-3 py-1.5 text-sm font-semibold text-emerald-300 xl:inline">Spotify · {device}</span>
+              <button className="btn" data-testid="mode" onClick={() => setShowMode(true)}><Icon name="users" size={20} /><span className="hidden md:inline">Modus</span></button>
               <button className="btn" onClick={() => setShowMelody(true)}><Icon name="music" size={20} /><span className="hidden md:inline">{hasRef ? 'Melodie ✓' : 'Melodie laden'}</span></button>
               <button className={`btn ${micOn ? '' : 'text-white/50'}`} onClick={() => setShowMic(true)}>
                 <Icon name={!micOn ? 'micOff' : settings.micMode === 'speaker' ? 'speaker' : 'headphones'} size={20} />
@@ -378,8 +486,64 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
       )}
 
       {(phase === 'mic' || showMic) && <MicDialog current={micOn ? settings.micMode : 'off'} first={phase === 'mic'} onChoose={chooseMic} onClose={phase === 'mic' ? undefined : () => setShowMic(false)} />}
+      {showMode && <ModeDialog profiles={profiles} current={turn.pid} sections={sections} onStart={startMode} onClose={() => setShowMode(false)} />}
       {showMelody && <MelodyDialog track={track} loaded={us} onApply={applyMelody} onClose={() => setShowMelody(false)} />}
     </div>
+  )
+}
+
+function ModeDialog({ profiles, current, sections, onStart, onClose }: { profiles: { id: string; name: string; color: string }[]; current: string; sections: Section[]; onStart(pids: string[], part: Section | null, style: 'pass' | 'duel'): void; onClose(): void }) {
+  const [pids, setPids] = useState<string[]>([current])
+  const [part, setPart] = useState(-1)
+  const [style, setStyle] = useState<'pass' | 'duel'>('duel')
+  const flip = (id: string) => setPids((l) => (l.includes(id) ? (l.length > 1 ? l.filter((x) => x !== id) : l) : l.length < 4 ? [...l, id] : l))
+  const multi = pids.length > 1
+  return (
+    <Modal onClose={onClose} wide>
+      <div className="flex items-start gap-4">
+        <h2 className="flex-1 text-3xl font-black tracking-tight">Spielmodus</h2>
+        <button className="btn-icon" onClick={onClose} aria-label="Schließen"><Icon name="close" /></button>
+      </div>
+      <p className="label mt-5">Wer singt? (bis zu 4, Reihenfolge = Antippen)</p>
+      <div className="flex flex-wrap gap-2">
+        {profiles.map((pr) => {
+          const k = pids.indexOf(pr.id)
+          return (
+            <button key={pr.id} data-testid={`pl-${pr.name}`} onClick={() => flip(pr.id)} className={`flex cursor-pointer items-center gap-2 rounded-full border py-1.5 pl-1.5 pr-4 font-semibold transition ${k >= 0 ? 'border-white/60 bg-white/15' : 'border-white/10 text-white/60 hover:bg-white/10'}`}>
+              <span className="flex h-9 w-9 items-center justify-center rounded-full font-black text-black" style={{ background: pr.color }}>{k >= 0 ? k + 1 : pr.name.slice(0, 1).toUpperCase()}</span>{pr.name}
+            </button>
+          )
+        })}
+      </div>
+      {profiles.length < 2 && <p className="mt-2 text-sm text-white/50">Weitere Sänger legst du unter „Karaoke-Abend“ an.</p>}
+
+      {multi && (
+        <>
+          <p className="label mt-5">Ablauf</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {([['duel', 'Duell', 'Alle singen nacheinander denselben Teil – wer trifft besser?'], ['pass', 'Mikro weitergeben', 'Ein Durchlauf, abwechselnd: bei ganzem Song je Abschnitt, bei einem Teil je Zeile.']] as const).map(([id, title, text]) => (
+              <button key={id} data-testid={`style-${id}`} onClick={() => setStyle(id)} className={`cursor-pointer rounded-2xl border p-4 text-left transition ${style === id ? 'border-white/60 bg-white/10' : 'border-white/10 hover:bg-white/5'}`}>
+                <span className="block text-lg font-bold">{title}</span><span className="text-sm text-white/60">{text}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      <p className="label mt-5">Was wird gesungen?</p>
+      <div className="scroll-thin max-h-64 space-y-1.5 overflow-y-auto pr-1">
+        <button onClick={() => setPart(-1)} className={`flex w-full cursor-pointer items-center gap-3 rounded-2xl border p-3 text-left ${part === -1 ? 'border-white/60 bg-white/10' : 'border-white/10 hover:bg-white/5'}`}><span className="text-lg font-bold">Ganzer Song</span></button>
+        {sections.map((sec, i) => (
+          <button key={i} data-testid={`sec-${i}`} onClick={() => setPart(i)} className={`flex w-full cursor-pointer items-center gap-3 rounded-2xl border p-3 text-left ${part === i ? 'border-white/60 bg-white/10' : 'border-white/10 hover:bg-white/5'}`}>
+            <span className={`shrink-0 rounded-full px-3 py-1 text-sm font-bold ${sec.label === 'Refrain' ? 'grad text-white' : 'bg-white/10'}`}>{sec.label}</span>
+            <span className="min-w-0 flex-1 truncate text-white/80">{sec.first}</span>
+            <span className="shrink-0 font-mono text-sm text-white/45">{fmtTime(sec.s)} · {Math.round(sec.e - sec.s)} s</span>
+          </button>
+        ))}
+        {!sections.length && <p className="text-white/50">Für diesen Song liegt kein synchroner Text vor – einzelne Abschnitte gibt es deshalb nicht.</p>}
+      </div>
+      <button data-testid="mode-start" className="btn-primary mt-6 w-full py-4 text-lg" onClick={() => onStart(pids, part >= 0 ? sections[part] : null, style)}><Icon name="play" />Los geht's</button>
+    </Modal>
   )
 }
 

@@ -16,7 +16,7 @@ async function run(mode, shot) {
   await page.addInitScript(({ mode, US, NOTES }) => {
     localStorage.setItem('encore-settings', JSON.stringify({ spotifyClientId: 'x'.repeat(32), micAsked: true, micMode: 'headphones' }))
     localStorage.setItem('encore-spotify-token', JSON.stringify({ access: 'tok', refresh: 'ref', exp: Date.now() + 3.6e6, clientId: 'x'.repeat(32) }))
-    if (mode === 'melodie' || mode === 'falsch') localStorage.setItem('encore-us2-t1', US)
+    if (mode === 'melodie' || mode === 'falsch' || mode === 'duell') localStorage.setItem('encore-us2-t1', US)
     navigator.mediaDevices.getUserMedia = async () => {
       const ac = new AudioContext()
       const osc = ac.createOscillator(); osc.type = 'sawtooth'
@@ -24,9 +24,12 @@ async function run(mode, shot) {
       const g = ac.createGain(); g.gain.value = 0
       const dest = ac.createMediaStreamDestination()
       osc.connect(lp).connect(g).connect(dest); osc.start()
-      const shift = mode === 'falsch' ? 4 : 0
       setInterval(() => {
-        const now = (globalThis.__spPos?.() ?? -1) / 1000 + 0.03
+        const raw = (globalThis.__spPos?.() ?? -1) / 1000
+        // Duell: der zweite Sänger (Anna) singt 4 Halbtöne daneben
+        const annaTurn = !!document.querySelector('[data-testid=turn]')?.textContent?.includes('Anna')
+        const shift = mode === 'falsch' || (mode === 'duell' && annaTurn) ? 4 : 0
+        const now = raw + 0.03
         const n = NOTES.find((x) => now >= x[0] && now < x[0] + 0.8)
         if (n) { osc.frequency.value = 440 * Math.pow(2, (n[1] + shift - 69) / 12); g.gain.value = 0.3 } else g.gain.value = 0
       }, 5)
@@ -61,10 +64,37 @@ async function run(mode, shot) {
     } }
     window.onSpotifyWebPlaybackSDKReady()` }))
   await page.goto(URL)
+  if (mode === 'duell') {
+    await page.getByRole('button', { name: 'Karaoke-Abend' }).first().click()
+    await page.getByPlaceholder('Name hinzufügen').fill('Anna')
+    await page.getByRole('button', { name: 'Hinzufügen' }).click()
+    await page.getByRole('button', { name: 'Bibliothek' }).first().click()
+  }
   await page.getByText('Spotify (Mitsingen)').click()
   await page.getByPlaceholder('Bei Spotify suchen').fill('test')
   await page.getByLabel('Testlied mitsingen').click()
   await page.getByText('Erste Zeile').first().waitFor()
+  if (mode === 'duell') {
+    await page.mouse.move(700, 300)
+    await page.getByTestId('mode').click()
+    await page.getByTestId('pl-Anna').click()
+    await page.getByTestId('style-duel').click()
+    await page.getByTestId('sec-0').click()
+    await page.screenshot({ path: 'tests/shots/s6-modus.png' })
+    await page.getByTestId('mode-start').click()
+    const t1 = await page.getByTestId('turn').textContent()
+    await page.waitForFunction(() => document.querySelector('[data-testid=turn]')?.textContent?.includes('Anna'), null, { timeout: 25000 })
+    await page.waitForTimeout(4500); await page.mouse.move(800, 320); await page.waitForTimeout(400)
+    await page.screenshot({ path: 'tests/shots/s6-duell.png' })
+    await page.getByTestId('rank-1').waitFor({ timeout: 30000 })
+    await page.waitForTimeout(600)
+    await page.screenshot({ path: 'tests/shots/s6-ergebnis.png' })
+    const r1 = await page.getByTestId('rank-1').textContent(), r2 = await page.getByTestId('rank-2').textContent()
+    const pts = async (id) => +(await page.getByTestId(id).locator('.grad-text').textContent())
+    const out = { mode, total: await pts('rank-1'), pitch: await pts('rank-2'), state: (t1.includes('Sänger 1') ? 'erst Sänger 1, dann Anna' : t1) + ' | Sieger: ' + (r1.includes('Sänger 1') ? 'Sänger 1' : 'Anna'), errors, played: true }
+    await ctx.close()
+    return out
+  }
   const want = mode === 'frei' ? 'Stimme erkannt' : mode === 'falsch' ? 'Zu hoch' : 'Treffer'
   const state = await page.waitForFunction((w) => document.querySelector('[data-testid=live-state]')?.textContent === w, want, { timeout: 9000 }).then(() => want).catch(() => 'nie: ' + want)
   const note = await page.getByTestId('live-note').textContent({ timeout: 500 }).catch(() => '')
@@ -78,7 +108,7 @@ async function run(mode, shot) {
   return res
 }
 
-const results = await Promise.all([run('frei', 's3'), run('melodie', 's4'), run('falsch'), run('auto', 's5')])
+const results = await Promise.all([run('frei', 's3'), run('melodie', 's4'), run('falsch'), run('auto', 's5'), run('duell')])
 console.table(results.map(({ errors, ...r }) => r))
 const by = Object.fromEntries(results.map((r) => [r.mode, r]))
 const checks = [
@@ -87,6 +117,7 @@ const checks = [
   ['mit Melodie-Datei: richtiger Sänger ≥ 85', by.melodie.total >= 85 && by.melodie.state === 'Treffer'],
   ['mit Melodie-Datei: falsche Tonart → Tonhöhe ≤ 15 und „Zu hoch"', by.falsch.pitch <= 15 && by.falsch.state === 'Zu hoch'],
   ['Noten automatisch gefunden und ausgerichtet (1,5 s Versatz): Sänger ≥ 80', by.auto.total >= 80 && by.auto.state === 'Treffer'],
+  ['Duell über eine Strophe: richtiger Sänger gewinnt (≥ 80), der schiefe verliert (≤ 50)', by.duell.total >= 80 && by.duell.pitch <= 50 && by.duell.state.endsWith('Sänger 1')],
   ['keine Browser-Fehler', results.every((r) => r.errors.length === 0)],
 ]
 for (const [n, ok] of checks) console.log(ok ? '✓' : '✗', n)
