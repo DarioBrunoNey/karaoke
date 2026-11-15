@@ -11,6 +11,7 @@ import type { LyricLine, ScoreResult, SpTrack } from '../lib/types'
 import { engine } from '../audio/engine'
 import { mic, type MicMode } from '../audio/mic'
 import { browserTransport, lyricsFor, remoteTransport, type Transport } from '../spotify/api'
+import { findMelody } from '../spotify/melodyDb'
 import { drawLane } from './pitchLane'
 import { MicDialog } from './Player'
 
@@ -34,8 +35,10 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   const [diff, setDiff] = useState(0)
   const [lyricsLoaded, setLyricsLoaded] = useState(false)
   const [us, setUs] = useState<UsSong | null>(() => {
-    try { const raw = localStorage.getItem(usKey(track.id)); return raw ? parseUltraStar(raw) : null } catch { return null }
+    try { const raw = localStorage.getItem(usKey(track.id)); return raw && raw !== '-' ? parseUltraStar(raw) : null } catch { return null }
   })
+  /** Automatische Notensuche: läuft, gefunden, nichts gefunden */
+  const [notes, setNotes] = useState<'search' | 'found' | 'none'>(() => (localStorage.getItem(usKey(track.id)) ? 'found' : 'search'))
   const [lineIdx, setLineIdx] = useState(-1)
   const [paused, setPaused] = useState(false)
   const [offset, setOffset] = useState(() => +(localStorage.getItem('encore-off-' + track.id) ?? localStorage.getItem('encore-off-default') ?? 0))
@@ -105,10 +108,24 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   }, [phase])
 
   useEffect(() => {
-    lyricsFor(track).then((l) => { setLrc(l.lines); setPlain(l.plain); setDiff(l.diff) }).finally(() => setLyricsLoaded(true))
+    let gone = false
+    lyricsFor(track)
+      .then(async (l) => {
+        setLrc(l.lines); setPlain(l.plain); setDiff(l.diff); setLyricsLoaded(true)
+        if (localStorage.getItem(usKey(track.id))) return // schon geladen – oder vom Nutzer bewusst entfernt
+        const m = await findMelody(track, l.lines).catch(() => null)
+        if (gone) return
+        if (!m) { setNotes('none'); return }
+        try { localStorage.setItem(usKey(track.id), m.text) } catch { /* nur für diesen Durchlauf */ }
+        setUs(parseUltraStar(m.text)); setNotes('found')
+        say(m.aligned ? 'Noten gefunden und am Text ausgerichtet' : 'Noten gefunden – Einsatz bitte mit „Text-Versatz“ anpassen')
+      })
+      .catch(() => setNotes('none'))
+      .finally(() => setLyricsLoaded(true))
     let lock: WakeLockSentinel | undefined
     navigator.wakeLock?.request('screen').then((l) => (lock = l)).catch(() => {})
-    return () => { tr.current?.destroy(); tr.current = null; mic.stop(); void lock?.release() }
+    return () => { gone = true; tr.current?.destroy(); tr.current = null; mic.stop(); void lock?.release() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [track])
 
   const finish = useCallback(async () => {
@@ -175,7 +192,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
     if (phase === 'mic') setPhase('loading'); else void startMic(mode)
   }
   const applyMelody = (text: string | null) => {
-    if (text === null) { localStorage.removeItem(usKey(track.id)); setUs(null); setShowMelody(false); return }
+    if (text === null) { localStorage.setItem(usKey(track.id), '-'); setUs(null); setNotes('none'); setShowMelody(false); return }
     const song = parseUltraStar(text) // wirft bei ungültiger Datei – der Dialog zeigt die Meldung
     try { localStorage.setItem(usKey(track.id), text) } catch { /* Speicher voll: gilt dann nur für diesen Durchlauf */ }
     setUs(song); setShowMelody(false)
@@ -312,7 +329,8 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
               <span data-testid="live-state" className={`text-xl font-black sm:text-2xl ${liveColor}`}>{liveLabel}</span>
               {live.note && <span data-testid="live-note" className="rounded-full bg-white/10 px-3 py-0.5 font-mono text-sm font-bold">{live.note}</span>}
             </div>
-            {!hasRef && <button className="absolute right-3 top-3 cursor-pointer rounded-full bg-white/10 px-3 py-1 text-sm font-semibold text-white/70 hover:bg-white/20" onClick={() => setShowMelody(true)}>Ohne Originalmelodie · Melodie laden</button>}
+            {!hasRef && notes === 'search' && <span className="absolute right-3 top-3 rounded-full bg-white/10 px-3 py-1 text-sm font-semibold text-white/70">Noten werden gesucht …</span>}
+            {!hasRef && notes !== 'search' && <button className="absolute right-3 top-3 cursor-pointer rounded-full bg-white/10 px-3 py-1 text-sm font-semibold text-white/70 hover:bg-white/20" onClick={() => setShowMelody(true)}>Für diesen Song keine Noten gefunden · selbst laden</button>}
             {verdict && <span key={verdict.n} className="pointer-events-none absolute right-4 bottom-3 rounded-full bg-white/15 px-4 py-1 text-xl font-black [animation:pop_.4s_both,fade-out_.5s_1.4s_forwards]">{verdict.text}</span>}
             <div className="absolute bottom-3 left-4 h-1.5 w-24 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-emerald-300 transition-[width] duration-100" style={{ width: `${live.level * 100}%` }} /></div>
           </div>

@@ -16,7 +16,7 @@ async function run(mode, shot) {
   await page.addInitScript(({ mode, US, NOTES }) => {
     localStorage.setItem('encore-settings', JSON.stringify({ spotifyClientId: 'x'.repeat(32), micAsked: true, micMode: 'headphones' }))
     localStorage.setItem('encore-spotify-token', JSON.stringify({ access: 'tok', refresh: 'ref', exp: Date.now() + 3.6e6, clientId: 'x'.repeat(32) }))
-    if (mode !== 'frei') localStorage.setItem('encore-us-t1', US)
+    if (mode === 'melodie' || mode === 'falsch') localStorage.setItem('encore-us-t1', US)
     navigator.mediaDevices.getUserMedia = async () => {
       const ac = new AudioContext()
       const osc = ac.createOscillator(); osc.type = 'sawtooth'
@@ -39,6 +39,12 @@ async function run(mode, shot) {
     if (u.includes('/search')) return route.fulfill({ json: { tracks: { items: [track] } } })
     return route.fulfill({ status: 204, body: '' })
   })
+  // Noten-Sammlung: enthält den Song nur im Modus „auto" – dort um 1,5 s verschoben (wie bei einem Musikvideo mit Vorspann)
+  await ctx.route('https://raw.githubusercontent.com/**', (route) => {
+    const u = route.request().url()
+    if (u.endsWith('index.json')) return route.fulfill({ json: mode === 'auto' ? [{ id: 'die-tester-testlied', artist: 'Die Tester', title: 'Testlied' }, { id: 'x', artist: 'Andere', title: 'Lied' }] : [{ id: 'x', artist: 'Andere', title: 'Lied' }] })
+    return route.fulfill({ contentType: 'text/plain', body: US.replace('#GAP:2000', '#GAP:3500') })
+  })
   await ctx.route('https://lrclib.net/**', (route) => route.fulfill({ json: [{ id: 1, duration: 14, syncedLyrics: '[00:02.00]Erste Zeile\n[00:06.00]Zweite Zeile\n[00:10.00]Dritte Zeile', plainLyrics: 'x' }] }))
   await ctx.route('https://sdk.scdn.co/**', (route) => route.fulfill({ contentType: 'text/javascript', body: `
     window.Spotify = { Player: class {
@@ -59,7 +65,7 @@ async function run(mode, shot) {
   await page.getByPlaceholder('Bei Spotify suchen').fill('test')
   await page.getByLabel('Testlied mitsingen').click()
   await page.getByText('Erste Zeile').first().waitFor()
-  const want = mode === 'frei' ? 'Stimme erkannt' : mode === 'melodie' ? 'Treffer' : 'Zu hoch'
+  const want = mode === 'frei' ? 'Stimme erkannt' : mode === 'falsch' ? 'Zu hoch' : 'Treffer'
   const state = await page.waitForFunction((w) => document.querySelector('[data-testid=live-state]')?.textContent === w, want, { timeout: 9000 }).then(() => want).catch(() => 'nie: ' + want)
   const note = await page.getByTestId('live-note').textContent({ timeout: 500 }).catch(() => '')
   if (shot) { await page.mouse.move(800, 300); await page.waitForTimeout(500); await page.screenshot({ path: `tests/shots/${shot}-singen.png` }) }
@@ -72,7 +78,7 @@ async function run(mode, shot) {
   return res
 }
 
-const results = await Promise.all([run('frei', 's3'), run('melodie', 's4'), run('falsch')])
+const results = await Promise.all([run('frei', 's3'), run('melodie', 's4'), run('falsch'), run('auto', 's5')])
 console.table(results.map(({ errors, ...r }) => r))
 const by = Object.fromEntries(results.map((r) => [r.mode, r]))
 const checks = [
@@ -80,6 +86,7 @@ const checks = [
   ['ohne Melodie: Stimme sichtbar + plausible Punkte (≥ 70)', by.frei.state === 'Stimme erkannt' && by.frei.total >= 70],
   ['mit Melodie-Datei: richtiger Sänger ≥ 85', by.melodie.total >= 85 && by.melodie.state === 'Treffer'],
   ['mit Melodie-Datei: falsche Tonart → Tonhöhe ≤ 15 und „Zu hoch"', by.falsch.pitch <= 15 && by.falsch.state === 'Zu hoch'],
+  ['Noten automatisch gefunden und ausgerichtet (1,5 s Versatz): Sänger ≥ 80', by.auto.total >= 80 && by.auto.state === 'Treffer'],
   ['keine Browser-Fehler', results.every((r) => r.errors.length === 0)],
 ]
 for (const [n, ok] of checks) console.log(ok ? '✓' : '✗', n)
