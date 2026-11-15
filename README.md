@@ -31,6 +31,7 @@ hinzufügen" bzw. „App installieren" wählen.
 | Bibliothek, Suche, Favoriten, zuletzt gesungen, Warteschlange, Sängerprofile, Bestenliste | ✔ |
 | Vollbild, TV-Darstellung, automatisch ausblendende Bedienung, Bildschirm bleibt an, PWA/offline | ✔ |
 | Spotify-Mitsing-Modus (Originalaufnahme + synchroner Text, eigene Client-ID, nur privat) | ✔ gegen nachgebautes Spotify getestet, nicht gegen das echte |
+| Spotify-Modus mit Bewertung: ohne Melodie-Datei Tonsicherheit/Timing, mit UltraStar-Datei (.txt) echter Melodievergleich | ✔ gegen nachgebautes Spotify getestet |
 | Duett-Modus, Fernbedienungs-Navigation per Pfeiltasten in der Bibliothek, Handy als Fernbedienung | geplant |
 
 ## Architektur

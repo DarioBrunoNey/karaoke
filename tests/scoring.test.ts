@@ -60,3 +60,43 @@ console.log('Melodie', at(0.5).toFixed(2), at(1.5).toFixed(2), at(2.5).toFixed(2
 assert.ok(Math.abs(at(0.5) - 57) < 0.4 && Math.abs(at(1.5) - 61) < 0.4 && Math.abs(at(2.5) - 64) < 0.4)
 assert.equal(at(0.96), 0)
 console.log('OK')
+
+// ---------- Bewertung ohne Originalmelodie ----------
+import { freeScore } from '../src/lib/freeScore.ts'
+import { parseUltraStar, syllableProgress } from '../src/lib/ultrastar.ts'
+{
+  const lines = Array.from({ length: 8 }, (_, k) => ({ t: k * 4, text: 'Kurze Zeile hier' }))
+  const N = fps * 32
+  const mk = (fn: (i: number, inLine: boolean, k: number) => number) => {
+    const u = new Float32Array(N)
+    for (let i = 0; i < N; i++) { const k = Math.floor(i / (4 * fps)); u[i] = fn(i, i % (4 * fps) < 2.5 * fps, k) }
+    return freeScore(u, fps, lines)
+  }
+  const scale = [60, 62, 64, 65, 67, 69, 71, 72]
+  const good = mk((i, on) => (on ? scale[Math.floor(i / 20) % 8] + 0.15 * Math.sin(i / 2) : 0))
+  const sharp = mk((i, on) => (on ? scale[Math.floor(i / 20) % 8] + 0.3 + 0.15 * Math.sin(i / 2) : 0)) // andere Stimmung, gleiche Tonart
+  const droneF = mk((_, on) => (on ? 61.3 : 0))
+  const speech = mk((i, on) => (on ? 55 + 6 * rnd() + 3 * Math.sin(i / 3) : 0))
+  const chroma = mk((i, on) => (on ? 60 + (Math.floor(i / 12) * 7) % 12 + (Math.floor(i / 12) % 2) * 0.5 : 0))
+  const offbeat = mk((i, on) => (!on ? scale[Math.floor(i / 20) % 8] : 0))
+  const quiet = mk(() => 0)
+  const sh = (nm: string, r: typeof good) => console.log(nm.padEnd(22), String(r.total).padStart(3), JSON.stringify(r.parts), 'Tonart', r.accuracy)
+  sh('frei: sauber', good); sh('frei: andere Stimmung', sharp); sh('frei: Brummer', droneF); sh('frei: Sprechen', speech)
+  sh('frei: schief', chroma); sh('frei: nur in Pausen', offbeat); sh('frei: stumm', quiet)
+  assert.ok(good.total >= 90 && sharp.total >= 90)
+  assert.ok(droneF.total < 60 && droneF.parts.pitch <= 30)
+  assert.ok(speech.parts.pitch < 25)
+  assert.ok(chroma.parts.pitch < good.parts.pitch - 30)
+  assert.ok(offbeat.total < 50)
+  assert.equal(quiet.total, 0)
+}
+{
+  const us = parseUltraStar(`#TITLE:Test\n#ARTIST:Wer\n#BPM:150\n#GAP:2000\n: 0 4 0 Hal\n: 4 4 2 lo\n: 8 8 4  Welt\n- 20\n* 24 4 -3 Neu\nF 28 4 0 ~\nE\n`)
+  assert.equal(us.lines.length, 2); assert.equal(us.lines[0].text, 'Hallo Welt'); assert.equal(us.notes, 4)
+  assert.equal(us.melody[Math.round(2.05 * 50)], 60); assert.equal(us.melody[Math.round(2.5 * 50)], 62); assert.equal(us.melody[Math.round(4.5 * 50)], 57)
+  assert.equal(us.melody[Math.round(1.5 * 50)], 0)
+  assert.ok(Math.abs(us.lines[0].t - 2) < 1e-9 && Math.abs(us.lines[1].t - 4.4) < 1e-9)
+  const p = syllableProgress(us.lines[0], 2.4)
+  assert.ok(p > 0.25 && p < 0.35, 'Silbenfortschritt ' + p)
+  console.log('UltraStar OK')
+}

@@ -48,7 +48,7 @@ export default function SpotifySearch() {
         </div>
         <button className="chip" onClick={() => { disconnect(); setConnected(false) }}>Spotify trennen</button>
       </div>
-      <p className="mt-3 text-sm text-white/50">Mitsing-Modus: Originalaufnahme mit Gesang und mitlaufendem Text. Gesang entfernen, Tonhöhe ändern und Punkte gibt es nur bei eigenen Dateien.</p>
+      <p className="mt-3 text-sm text-white/50">Spotify spielt die Originalaufnahme, die App zeigt den Text und bewertet deine Stimme (Tonsicherheit und Timing). Für „zu hoch / zu tief“ je Ton im Player eine Melodie-Datei laden. Am genauesten mit Kopfhörern.</p>
       {err && <p className="mt-4 rounded-2xl bg-red-500/15 p-3 text-red-200">{err}</p>}
       {busy && !hits && <p className="mt-6 text-white/50">Suche …</p>}
       {listName && hits && hits.length > 0 && (

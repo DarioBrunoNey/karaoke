@@ -60,6 +60,7 @@ interface State {
   playNext(): boolean
   finish(songId: string, profileId: string, result: ScoreResult, micUsed: boolean): Promise<void>
   clearScores(): Promise<void>
+  addScore(e: Omit<ScoreEntry, 'id' | 'date'>): Promise<number>
   setEdit(id: string | null): void
 }
 
@@ -168,6 +169,7 @@ export const useStore = create<State>((set, get) => ({
     set({ view: { name: 'player', songId, profileId: pid, qid, run: Date.now() } })
   },
   playSpotify(track, profileId, qid) {
+    void engine.init().catch(() => {}) // für das Mikrofon: AudioContext im Klick entsperren
     const pid = profileId ?? get().activeProfileId
     if (qid) set({ queue: get().queue.filter((q) => q.qid !== qid) })
     set({ view: { name: 'spotify', track, profileId: pid, run: Date.now() } })
@@ -196,6 +198,13 @@ export const useStore = create<State>((set, get) => ({
       set({ scores })
     }
     set({ view: { name: 'results', songId, profileId, result, micUsed, rank } })
+  },
+  async addScore(e) {
+    const entry: ScoreEntry = { ...e, id: uid(), date: Date.now() }
+    await Db.putScore(entry)
+    const scores = [...get().scores, entry]
+    set({ scores })
+    return scores.filter((x) => x.songId === e.songId && x.total > e.total).length + 1
   },
   async clearScores() { await Db.clearScores(); set({ scores: [] }) },
   setEdit: (id) => set({ editSongId: id }),
