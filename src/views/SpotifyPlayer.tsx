@@ -15,10 +15,11 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   const [error, setError] = useState('')
   const [lines, setLines] = useState<LyricLine[]>([])
   const [plain, setPlain] = useState('')
+  const [diff, setDiff] = useState(0)
   const [lyricsLoaded, setLyricsLoaded] = useState(false)
   const [lineIdx, setLineIdx] = useState(-1)
   const [paused, setPaused] = useState(false)
-  const [offset, setOffset] = useState(() => +(localStorage.getItem('encore-off-' + track.id) || 0))
+  const [offset, setOffset] = useState(() => +(localStorage.getItem('encore-off-' + track.id) ?? localStorage.getItem('encore-off-default') ?? 0))
   const [idle, setIdle] = useState(false)
   const [device, setDevice] = useState('')
   const tr = useRef<Transport | null>(null)
@@ -45,7 +46,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
 
   useEffect(() => {
     void start('browser')
-    lyricsFor(track).then((l) => { setLines(l.lines); setPlain(l.plain) }).finally(() => setLyricsLoaded(true))
+    lyricsFor(track).then((l) => { setLines(l.lines); setPlain(l.plain); setDiff(l.diff) }).finally(() => setLyricsLoaded(true))
     let lock: WakeLockSentinel | undefined
     navigator.wakeLock?.request('screen').then((l) => (lock = l)).catch(() => {})
     return () => { tr.current?.destroy(); tr.current = null; void lock?.release() }
@@ -81,7 +82,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   const toggle = useCallback(() => { void tr.current?.toggle().catch(() => {}) }, [])
   const fullscreen = () => { if (document.fullscreenElement) void document.exitFullscreen(); else void document.documentElement.requestFullscreen?.().catch(() => {}) }
   const leave = useCallback(() => { setLibraryTab('spotify'); go({ name: 'library' }) }, [go, setLibraryTab])
-  const shift = (d: number) => { const v = Math.round((offset + d) * 100) / 100; setOffset(v); localStorage.setItem('encore-off-' + track.id, String(v)) }
+  const shift = (d: number) => { const v = Math.round((offset + d) * 100) / 100; setOffset(v); localStorage.setItem('encore-off-' + track.id, String(v)); localStorage.setItem('encore-off-default', String(v)) }
 
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
@@ -201,6 +202,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
               </div>
             )}
             <div className="ml-auto flex items-center gap-2">
+              {lines.length > 0 && diff >= 2 && <span className="hidden rounded-full bg-yellow-300/15 px-3 py-1.5 text-sm font-semibold text-yellow-200 md:inline" title="Die gefundene Textfassung ist anders lang als die Spotify-Aufnahme">Text evtl. andere Fassung</span>}
               <span className="hidden rounded-full bg-emerald-400/15 px-3 py-1.5 text-sm font-semibold text-emerald-300 md:inline">Spotify · {device}</span>
               {tr.current?.kind === 'browser' && <button className="btn hidden lg:inline-flex" onClick={() => void start('remote')} title="Auf einem anderen Spotify-Gerät abspielen"><Icon name="speaker" size={20} />Anderes Gerät</button>}
               <button className="btn-icon" onClick={fullscreen} aria-label="Vollbild"><Icon name="full" /></button>

@@ -120,22 +120,28 @@ export const remoteSeek = (ms: number) => api('/me/player/seek?position_ms=' + M
 export const remoteState = () => api('/me/player')
 
 /** Synchronen Liedtext aus LRCLIB holen (Treffer mit passender Länge bevorzugt); Ergebnis wird je Titel gemerkt. */
-export async function lyricsFor(t: SpTrack): Promise<{ lines: LyricLine[]; plain: string }> {
-  const key = 'encore-lyr-' + t.id
+export async function lyricsFor(t: SpTrack): Promise<{ lines: LyricLine[]; plain: string; diff: number }> {
+  const key = 'encore-lyr3-' + t.id
   try { const c = JSON.parse(localStorage.getItem(key) || 'null'); if (c) return c } catch { /* neu laden */ }
   const artist = t.artists.split(',')[0]
   const title = t.name.replace(/\s+-\s+.*(remaster|version|edit|mix|live).*$/i, '').replace(/\s*\((feat|with|remaster)[^)]*\)/gi, '')
   const dur = t.durationMs / 1000
-  let hits: any[] = []
-  try {
-    const r = await fetch('https://lrclib.net/api/search?' + new URLSearchParams({ track_name: title, artist_name: artist }))
-    if (r.ok) hits = await r.json()
-  } catch { /* offline oder Dienst nicht erreichbar */ }
-  const score = (h: any) => (h.syncedLyrics ? 0 : 1000) + Math.abs((h.duration || 0) - dur)
-  hits.sort((a, b) => score(a) - score(b))
-  const best = hits[0]
+  const get = async (path: string) => { try { const r = await fetch('https://lrclib.net/api/' + path); return r.ok ? await r.json() : null } catch { return null } }
+  // 1. Versuch: exakter Treffer inkl. Album und Länge (LRCLIB toleriert dabei nur ±2 s)
+  let best: any = await get('get?' + new URLSearchParams({ track_name: t.name, artist_name: artist, album_name: t.album, duration: String(Math.round(dur)) }))
+  if (!best?.syncedLyrics) {
+    // 2. Versuch: Suche; synchronisierte Fassung mit der ähnlichsten Länge gewinnt
+    const lists = await Promise.all([get('search?' + new URLSearchParams({ track_name: title, artist_name: artist })), get('search?' + new URLSearchParams({ q: title + ' ' + artist }))])
+    const hits: any[] = lists.flatMap((l) => (Array.isArray(l) ? l : []))
+    const score = (h: any) => (h.syncedLyrics ? 0 : 1000) + Math.abs((h.duration || 0) - dur)
+    hits.sort((x, y) => score(x) - score(y))
+    best = hits[0] ?? best
+  }
+  const diff = best ? Math.abs((best.duration || 0) - dur) : 99
   const out = {
-    lines: best?.syncedLyrics && Math.abs(best.duration - dur) < 8 ? parseLrc(best.syncedLyrics).filter((l) => l.text) : [],
+    lines: best?.syncedLyrics && diff < 4 ? parseLrc(best.syncedLyrics).filter((l) => l.text) : [],
+    /** Abweichung der Textfassung von der Spotify-Aufnahme in Sekunden – ab ~2 s ist der Text oft eine andere Version */
+    diff: Math.round(diff * 10) / 10,
     plain: (best?.plainLyrics as string) || '',
   }
   if (best) { try { localStorage.setItem(key, JSON.stringify(out)) } catch { /* Speicher voll – egal */ } }
@@ -180,6 +186,17 @@ export async function browserTransport(track: SpTrack, volume: number): Promise<
     pos = s.position; at = performance.now(); paused = s.paused
     if (s.duration) dur = s.duration
   })
+  // Statusmeldungen kommen nur bei Änderungen. Damit Puffern/Nachladen den Text nicht verschiebt,
+  // wird die echte Position zusätzlich zweimal pro Sekunde abgefragt.
+  const sync = setInterval(() => {
+    const t0 = performance.now()
+    player.getCurrentState().then((s: any) => {
+      if (!s) return
+      const t1 = performance.now()
+      pos = s.position + (t1 - t0) / 2; at = t1; paused = s.paused
+      if (s.duration) dur = s.duration
+    }).catch(() => {})
+  }, 500)
   const deviceId = await new Promise<string>((resolve, reject) => {
     player.addListener('ready', (e: any) => resolve(e.device_id))
     for (const ev of ['initialization_error', 'authentication_error', 'account_error']) player.addListener(ev, (e: any) => reject(new Error(e.message)))
@@ -190,7 +207,7 @@ export async function browserTransport(track: SpTrack, volume: number): Promise<
   // Das neue Gerät ist bei Spotify manchmal erst nach einem Moment bekannt
   for (let i = 0; ; i++) {
     try { await playOn(track.uri, deviceId); break }
-    catch (e) { if (i >= 3) { player.disconnect(); throw e } await new Promise((r) => setTimeout(r, 700)) }
+    catch (e) { if (i >= 3) { clearInterval(sync); player.disconnect(); throw e } await new Promise((r) => setTimeout(r, 700)) }
   }
   return {
     kind: 'browser', deviceName: 'dieses Gerät',
@@ -200,7 +217,7 @@ export async function browserTransport(track: SpTrack, volume: number): Promise<
     toggle: () => player.togglePlay(),
     seek: async (s) => { pos = s * 1000; at = performance.now(); await player.seek(s * 1000) },
     setVolume: (v) => void player.setVolume(v),
-    destroy: () => { try { player.pause(); player.disconnect() } catch { /* schon getrennt */ } },
+    destroy: () => { clearInterval(sync); try { player.pause(); player.disconnect() } catch { /* schon getrennt */ } },
   }
 }
 

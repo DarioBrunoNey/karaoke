@@ -29,6 +29,7 @@ await ctx.route('https://sdk.scdn.co/**', (route) => route.fulfill({ contentType
     now() { return this.paused ? this.pos : Math.min(14000, this.pos + performance.now() - this.t) }
     async connect() { setTimeout(() => { this.l.ready({ device_id: 'dev1' }); this.pos = 0; this.paused = false; this.t = performance.now(); this.emit()
       this.iv = setInterval(() => { if (!this.paused && this.now() >= 14000) { this.pos = 0; this.paused = true; this.emit() } }, 100) }, 200); return true }
+    async getCurrentState() { return { position: this.now(), paused: this.paused, duration: 14000 } }
     async togglePlay() { this.pos = this.now(); this.paused = !this.paused; this.t = performance.now(); this.emit() }
     async seek(ms) { this.pos = ms; this.t = performance.now(); this.emit() }
     async setVolume() {} pause() { this.paused = true } disconnect() { clearInterval(this.iv) }
