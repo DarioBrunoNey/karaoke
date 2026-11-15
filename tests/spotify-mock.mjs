@@ -16,7 +16,7 @@ async function run(mode, shot) {
   await page.addInitScript(({ mode, US, NOTES }) => {
     localStorage.setItem('encore-settings', JSON.stringify({ spotifyClientId: 'x'.repeat(32), micAsked: true, micMode: 'headphones' }))
     localStorage.setItem('encore-spotify-token', JSON.stringify({ access: 'tok', refresh: 'ref', exp: Date.now() + 3.6e6, clientId: 'x'.repeat(32) }))
-    if (mode === 'melodie' || mode === 'falsch' || mode === 'duell') localStorage.setItem('encore-us3-t1', US)
+    if (['melodie', 'falsch', 'duell', 'handys'].includes(mode)) localStorage.setItem('encore-us3-t1', US)
     navigator.mediaDevices.getUserMedia = async () => {
       const ac = new AudioContext()
       const osc = ac.createOscillator(); osc.type = 'sawtooth'
@@ -63,7 +63,7 @@ async function run(mode, shot) {
       async setVolume() {} pause() { this.paused = true } disconnect() { clearInterval(this.iv) }
     } }
     window.onSpotifyWebPlaybackSDKReady()` }))
-  await page.goto(URL)
+  await page.goto(URL + (mode === 'handys' ? '?bc' : ''))
   if (mode === 'duell') {
     await page.getByRole('button', { name: 'Karaoke-Abend' }).first().click()
     await page.getByPlaceholder('Name hinzufügen').fill('Anna')
@@ -95,6 +95,52 @@ async function run(mode, shot) {
     await ctx.close()
     return out
   }
+  if (mode === 'handys') {
+    // Zwei simulierte Handys verbinden sich über den Link aus dem QR-Code; jedes „singt" einen Dauerton
+    await page.mouse.move(700, 300)
+    await page.getByTestId('mode').click()
+    await page.getByTestId('phones-start').click()
+    const url = await page.getByTestId('phone-url').textContent()
+    const phone = async (name, midi) => {
+      const ph = await ctx.newPage()
+      ph.on('pageerror', (e) => errors.push('Handy: ' + e))
+      await ph.addInitScript((midi) => {
+        navigator.mediaDevices.getUserMedia = async () => {
+          const ac = new AudioContext(); const o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 440 * Math.pow(2, (midi - 69) / 12)
+          const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1500
+          const g = ac.createGain(); g.gain.value = 0.3; const d = ac.createMediaStreamDestination(); o.connect(lp).connect(g).connect(d); o.start(); return d.stream
+        }
+      }, midi)
+      await ph.setViewportSize({ width: 390, height: 780 })
+      await ph.goto(url)
+      await ph.getByPlaceholder('Dein Name').fill(name)
+      await ph.getByTestId('phone-start').click()
+      await ph.getByTestId('phone-state').waitFor()
+      return ph
+    }
+    const pa = await phone('Anna', 60), pb = await phone('Ben', 64)
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid=phone-chip]').length === 2, null, { timeout: 8000 })
+    await pa.waitForTimeout(600)
+    await pa.screenshot({ path: 'tests/shots/s7-handy.png' })
+    await page.screenshot({ path: 'tests/shots/s7-verbinden.png' })
+    await page.getByTestId('pl-Anna').click(); await page.getByTestId('pl-Ben').click(); await page.getByTestId('pl-Sänger 1').click()
+    await page.getByTestId('style-simul').click()
+    await page.getByTestId('mode-start').click()
+    await page.getByTestId('lane-Ben').waitFor()
+    await page.waitForFunction(() => +document.querySelector('[data-testid="score-Anna"]')?.textContent > 0 && +document.querySelector('[data-testid="score-Ben"]')?.textContent > 0, null, { timeout: 12000 }).catch(() => {})
+    await page.mouse.move(800, 200); await page.waitForTimeout(400)
+    const noteA = await page.getByTestId('lane-Anna').locator('.font-mono').textContent({ timeout: 2000 }).catch(() => '')
+    const noteB = await page.getByTestId('lane-Ben').locator('.font-mono').textContent({ timeout: 2000 }).catch(() => '')
+    await page.screenshot({ path: 'tests/shots/s7-gleichzeitig.png' })
+    await page.getByTestId('rank-2').waitFor({ timeout: 30000 })
+    await page.waitForTimeout(500)
+    await page.screenshot({ path: 'tests/shots/s7-ergebnis.png' })
+    const pts = async (id) => +(await page.getByTestId(id).locator('.grad-text').textContent())
+    const names = (await page.getByTestId('rank-1').textContent()).includes('Anna') || (await page.getByTestId('rank-1').textContent()).includes('Ben')
+    const out = { mode, total: await pts('rank-1'), pitch: await pts('rank-2'), state: `Anna singt ${noteA}, Ben singt ${noteB}`, note: names ? 'ok' : 'falsche Namen', errors, played: true }
+    await ctx.close()
+    return out
+  }
   const want = mode === 'frei' ? 'Stimme erkannt' : mode === 'falsch' ? 'Zu hoch' : 'Treffer'
   const state = await page.waitForFunction((w) => document.querySelector('[data-testid=live-state]')?.textContent === w, want, { timeout: 9000 }).then(() => want).catch(() => 'nie: ' + want)
   const note = await page.getByTestId('live-note').textContent({ timeout: 500 }).catch(() => '')
@@ -108,7 +154,7 @@ async function run(mode, shot) {
   return res
 }
 
-const results = await Promise.all([run('frei', 's3'), run('melodie', 's4'), run('falsch'), run('auto', 's5'), run('duell')])
+const results = await Promise.all([run('frei', 's3'), run('melodie', 's4'), run('falsch'), run('auto', 's5'), run('duell'), run('handys')])
 console.table(results.map(({ errors, ...r }) => r))
 const by = Object.fromEntries(results.map((r) => [r.mode, r]))
 const checks = [
@@ -118,6 +164,7 @@ const checks = [
   ['mit Melodie-Datei: falsche Tonart → Tonhöhe ≤ 15 und „Zu hoch"', by.falsch.pitch <= 15 && by.falsch.state === 'Zu hoch'],
   ['Noten automatisch gefunden und ausgerichtet (1,5 s Versatz): Sänger ≥ 80', by.auto.total >= 80 && by.auto.state === 'Treffer'],
   ['Duell über eine Strophe: richtiger Sänger gewinnt (≥ 80), der schiefe verliert (≤ 50)', by.duell.total >= 80 && by.duell.pitch <= 50 && by.duell.state.endsWith('Sänger 1')],
+  ['Zwei Handy-Mikrofone gleichzeitig: beide Stimmen kommen getrennt an (C4 / E4), beide bekommen Punkte', by.handys.state === 'Anna singt C4, Ben singt E4' && by.handys.total > 0 && by.handys.pitch > 0 && by.handys.note === 'ok'],
   ['keine Browser-Fehler', results.every((r) => r.errors.length === 0)],
 ]
 for (const [n, ok] of checks) console.log(ok ? '✓' : '✗', n)

@@ -6,6 +6,7 @@ import type { Profile, QueueItem, ScoreEntry, ScoreResult, Song, SpTrack } from 
 import { finishLogin } from './spotify/api'
 import type { MicMode } from './audio/mic'
 import { engine } from './audio/engine'
+import { phoneUrl, startPhoneHost, type Phone } from './remote/host'
 
 export interface Settings {
   micMode: MicMode | 'off'
@@ -39,6 +40,10 @@ interface State {
   view: View
   editSongId: string | null
   libraryTab: 'all' | 'fav' | 'recent' | 'spotify'
+  /** Handy-Mikrofone: verbundene Handys und Zustand der Verbindung */
+  phones: Phone[]
+  phoneHost: { state: 'off' | 'starting' | 'on' | 'error'; url: string; error: string }
+  startPhones(): Promise<void>
   setLibraryTab(t: 'all' | 'fav' | 'recent' | 'spotify'): void
   toast: string | null
   init(): Promise<void>
@@ -69,6 +74,20 @@ let toastTimer = 0
 export const useStore = create<State>((set, get) => ({
   ready: false, songs: [], profiles: [], scores: [], queue: [], activeProfileId: '',
   settings: loadSettings(), view: { name: 'library' }, editSongId: null, toast: null, libraryTab: 'all',
+  phones: [], phoneHost: { state: 'off', url: '', error: '' },
+  async startPhones() {
+    if (get().phoneHost.state === 'on' || get().phoneHost.state === 'starting') return
+    set({ phoneHost: { state: 'starting', url: '', error: '' } })
+    try {
+      const code = await startPhoneHost({
+        profileFor: async (name) => (get().profiles.find((p) => p.name.toLowerCase() === name.toLowerCase()) ?? (await get().addProfile(name))).id,
+        onChange: (phones) => set({ phones }),
+      })
+      set({ phoneHost: { state: 'on', url: phoneUrl(code), error: '' } })
+    } catch (e) {
+      set({ phoneHost: { state: 'error', url: '', error: (e as Error).message } })
+    }
+  },
   setLibraryTab: (libraryTab) => set({ libraryTab }),
 
   async init() {

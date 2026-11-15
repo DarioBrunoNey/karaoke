@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useStore } from '../store'
 import { Cover, Icon } from '../ui'
+import PhonePanel from './PhonePanel'
 
 export default function Party() {
   const { profiles, activeProfileId, setActiveProfile, addProfile, removeProfile, queue, songs, dequeue, moveQueue, setQueueSinger, playNext, go, scores } = useStore()
@@ -74,6 +75,10 @@ export default function Party() {
             })}
           </ol>
         )}
+      </section>
+      <section className="glass p-6 sm:p-8 lg:col-span-2">
+        <h2 className="mb-3 text-3xl font-black tracking-tight">Handy-Mikrofone</h2>
+        <PhonePanel />
       </section>
     </div>
   )
