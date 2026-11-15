@@ -1,4 +1,4 @@
-import type { LyricLine } from './types'
+import type { LyricLine } from './types.ts'
 
 const TAG = /\[(\d{1,3}):(\d{1,2}(?:[.:]\d{1,3})?)\]/g
 

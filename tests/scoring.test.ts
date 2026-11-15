@@ -112,3 +112,15 @@ import { parseUltraStar, syllableProgress } from '../src/lib/ultrastar.ts'
   assert.equal(w[0].syl.length, 6)
   console.log('Wörter OK')
 }
+{
+  // Ausrichtung der Notendatei: 12 s Vorspann und 1,5 % anderes Tempo müssen erkannt werden; Refrain wiederholt sich
+  const { alignFit } = await import('../src/spotify/melodyDb.ts')
+  const words = ['Erste Strophe beginnt', 'Zweite Zeile folgt', 'Refrain kommt jetzt', 'Dritte Zeile hier', 'Vierte Zeile dort', 'Refrain kommt jetzt', 'Fuenfte Zeile dann', 'Sechste Zeile noch', 'Refrain kommt jetzt', 'Letzte Zeile endet']
+  const us: any = { lines: words.map((text, k) => ({ t: 12 + k * 20, text, syl: [] })) }
+  const lrc = words.map((text, k) => ({ t: (12 + k * 20) * 0.985 - 12 + 0.1 * (k % 2 ? 1 : -1), text }))
+  const f = alignFit(us, lrc)!
+  console.log('Ausrichtung: Tempo', f.a.toFixed(4), 'Versatz', f.b.toFixed(2), 'Zeilen', f.inliers)
+  assert.ok(Math.abs(f.a - 0.985) < 0.003 && Math.abs(f.b + 12) < 0.4)
+  assert.equal(alignFit(us, words.map((text, k) => ({ t: k * 7 + (k * k) % 13, text: 'ganz anderer text ' + k }))), null)
+  console.log('Ausrichtung OK')
+}

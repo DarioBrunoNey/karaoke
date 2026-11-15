@@ -19,7 +19,7 @@ type Phase = 'mic' | 'loading' | 'ready' | 'ended' | 'error'
 const FPS = 50
 const LIVE_LABEL: Record<LiveState, string> = { none: '', silent: 'Sing!', hit: 'Treffer', high: 'Zu hoch', low: 'Zu tief' }
 const LIVE_COLOR: Record<LiveState, string> = { none: 'text-white/40', silent: 'text-white/60', hit: 'text-emerald-300', high: 'text-sky-300', low: 'text-pink' }
-const usKey = (id: string) => 'encore-us-' + id
+const usKey = (id: string) => 'encore-us2-' + id
 
 /**
  * Spotify-Modus: Spotify spielt die Originalaufnahme, die App zeigt den Text synchron und bewertet die Stimme.
@@ -118,7 +118,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
         if (!m) { setNotes('none'); return }
         try { localStorage.setItem(usKey(track.id), m.text) } catch { /* nur für diesen Durchlauf */ }
         setUs(parseUltraStar(m.text)); setNotes('found')
-        say(m.aligned ? 'Noten gefunden und am Text ausgerichtet' : 'Noten gefunden – Einsatz bitte mit „Text-Versatz“ anpassen')
+        say(m.aligned ? 'Noten gefunden und an die Spotify-Aufnahme angepasst' : 'Noten gefunden – Einsatz bitte mit „Text-Versatz“ prüfen')
       })
       .catch(() => setNotes('none'))
       .finally(() => setLyricsLoaded(true))

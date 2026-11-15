@@ -2,7 +2,7 @@
 // Anmeldung per OAuth (PKCE, ohne Geheimnis), Wiedergabe über das Web Playback SDK bzw. Spotify Connect.
 // Die App steuert nur die Wiedergabe; auf das Audiosignal gibt es keinen Zugriff (und es wird keiner versucht).
 import type { LyricLine, SpTrack } from '../lib/types'
-import { parseLrc } from '../lib/lrc'
+import { parseLrc } from '../lib/lrc.ts'
 
 const SCOPES = 'streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state playlist-read-private playlist-read-collaborative'
 const TOKEN_KEY = 'encore-spotify-token'
@@ -119,32 +119,56 @@ export const remoteResume = () => api('/me/player/play', { method: 'PUT' })
 export const remoteSeek = (ms: number) => api('/me/player/seek?position_ms=' + Math.round(ms), { method: 'PUT' })
 export const remoteState = () => api('/me/player')
 
-/** Synchronen Liedtext aus LRCLIB holen (Treffer mit passender Länge bevorzugt); Ergebnis wird je Titel gemerkt. */
+const lnorm = (x: string) => x.toLowerCase().replace(/[^a-z0-9äöüß]/g, '')
+
+/**
+ * Wählt unter mehreren Textfassungen die verlässlichste: In der Datenbank liegen oft etliche Einsendungen
+ * zum selben Titel, deren Zeiten um Sekunden voneinander abweichen. Genommen wird die Fassung, deren
+ * Zeilenzeiten von den meisten anderen bestätigt werden (Abweichung im Mittel ≤ 0,4 s).
+ */
+export function consensus(cands: { lines: LyricLine[]; exact?: boolean }[]): { lines: LyricLine[]; support: number } | null {
+  if (!cands.length) return null
+  const sig = cands.map((c) => { const m = new Map<string, number>(); for (const l of c.lines) { const k = lnorm(l.text).slice(0, 14); if (k.length >= 6 && !m.has(k)) m.set(k, l.t) } return m })
+  let best = 0, bestScore = -1
+  cands.forEach((c, i) => {
+    let support = 0
+    sig.forEach((other, j) => {
+      if (i === j) return
+      const d: number[] = []
+      for (const [k, t] of sig[i]) { const o = other.get(k); if (o !== undefined) d.push(Math.abs(t - o)) }
+      if (d.length >= 4) { d.sort((x, y) => x - y); if (d[d.length >> 1] <= 0.4) support++ }
+    })
+    const score = support + (c.exact ? 0.5 : 0)
+    if (score > bestScore) { bestScore = score; best = i }
+  })
+  return { lines: cands[best].lines, support: Math.floor(bestScore) }
+}
+
+/** Synchronen Liedtext aus LRCLIB holen; unter den Fassungen passender Länge entscheidet die Mehrheit. */
 export async function lyricsFor(t: SpTrack): Promise<{ lines: LyricLine[]; plain: string; diff: number }> {
-  const key = 'encore-lyr3-' + t.id
+  const key = 'encore-lyr4-' + t.id
   try { const c = JSON.parse(localStorage.getItem(key) || 'null'); if (c) return c } catch { /* neu laden */ }
   const artist = t.artists.split(',')[0]
   const title = t.name.replace(/\s+-\s+.*(remaster|version|edit|mix|live).*$/i, '').replace(/\s*\((feat|with|remaster)[^)]*\)/gi, '')
   const dur = t.durationMs / 1000
   const get = async (path: string) => { try { const r = await fetch('https://lrclib.net/api/' + path); return r.ok ? await r.json() : null } catch { return null } }
-  // 1. Versuch: exakter Treffer inkl. Album und Länge (LRCLIB toleriert dabei nur ±2 s)
-  let best: any = await get('get?' + new URLSearchParams({ track_name: t.name, artist_name: artist, album_name: t.album, duration: String(Math.round(dur)) }))
-  if (!best?.syncedLyrics) {
-    // 2. Versuch: Suche; synchronisierte Fassung mit der ähnlichsten Länge gewinnt
-    const lists = await Promise.all([get('search?' + new URLSearchParams({ track_name: title, artist_name: artist })), get('search?' + new URLSearchParams({ q: title + ' ' + artist }))])
-    const hits: any[] = lists.flatMap((l) => (Array.isArray(l) ? l : []))
-    const score = (h: any) => (h.syncedLyrics ? 0 : 1000) + Math.abs((h.duration || 0) - dur)
-    hits.sort((x, y) => score(x) - score(y))
-    best = hits[0] ?? best
+  const [exact, s1, s2] = await Promise.all([
+    get('get?' + new URLSearchParams({ track_name: t.name, artist_name: artist, album_name: t.album, duration: String(Math.round(dur)) })),
+    get('search?' + new URLSearchParams({ track_name: title, artist_name: artist })),
+    get('search?' + new URLSearchParams({ q: title + ' ' + artist })),
+  ])
+  const seen = new Set<number>()
+  const hits: any[] = []
+  for (const h of [exact, ...(Array.isArray(s1) ? s1 : []), ...(Array.isArray(s2) ? s2 : [])]) {
+    if (h?.id && !seen.has(h.id)) { seen.add(h.id); hits.push(h) }
   }
-  const diff = best ? Math.abs((best.duration || 0) - dur) : 99
-  const out = {
-    lines: best?.syncedLyrics && diff < 4 ? parseLrc(best.syncedLyrics).filter((l) => l.text) : [],
-    /** Abweichung der Textfassung von der Spotify-Aufnahme in Sekunden – ab ~2 s ist der Text oft eine andere Version */
-    diff: Math.round(diff * 10) / 10,
-    plain: (best?.plainLyrics as string) || '',
-  }
-  if (best) { try { localStorage.setItem(key, JSON.stringify(out)) } catch { /* Speicher voll – egal */ } }
+  const synced = hits.filter((h) => h.syncedLyrics)
+  let pool = synced.filter((h) => Math.abs((h.duration || 0) - dur) <= 2)
+  if (!pool.length) pool = synced.filter((h) => Math.abs((h.duration || 0) - dur) <= 4)
+  const pickd = consensus(pool.map((h) => ({ lines: parseLrc(h.syncedLyrics).filter((l) => l.text), exact: h.id === exact?.id })))
+  const diff = pool.length ? Math.min(...pool.map((h) => Math.abs((h.duration || 0) - dur))) : 99
+  const out = { lines: pickd?.lines ?? [], plain: (hits.find((h) => h.plainLyrics)?.plainLyrics as string) || '', diff: Math.round(diff * 10) / 10 }
+  if (hits.length) { try { localStorage.setItem(key, JSON.stringify(out)) } catch { /* Speicher voll – egal */ } }
   return out
 }
 
