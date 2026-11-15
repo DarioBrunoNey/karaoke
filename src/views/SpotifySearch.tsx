@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { Icon, fmtTime } from '../ui'
-import { disconnect, isConnected, searchTracks, startLogin } from '../spotify/api'
+import { disconnect, isConnected, playlistId, playlistTracks, searchTracks, startLogin } from '../spotify/api'
 import type { SpTrack } from '../lib/types'
 
 export default function SpotifySearch() {
@@ -11,13 +11,18 @@ export default function SpotifySearch() {
   const [hits, setHits] = useState<SpTrack[] | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [listName, setListName] = useState('')
 
   useEffect(() => {
     if (!connected || q.trim().length < 2) { setHits(null); return }
     let stale = false
     const id = setTimeout(async () => {
       setBusy(true); setErr('')
-      try { const r = await searchTracks(q.trim()); if (!stale) setHits(r) }
+      try {
+        const pl = playlistId(q)
+        if (pl) { const r = await playlistTracks(pl); if (!stale) { setHits(r.tracks); setListName(r.name) } }
+        else { const r = await searchTracks(q.trim()); if (!stale) { setHits(r); setListName('') } }
+      }
       catch (e) { if (!stale) { setErr((e as Error).message); setConnected(isConnected()) } }
       if (!stale) setBusy(false)
     }, 350)
@@ -39,13 +44,19 @@ export default function SpotifySearch() {
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative min-w-60 flex-1 sm:max-w-xl">
           <Icon name="search" className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-white/40" />
-          <input autoFocus className="field rounded-full pl-12" placeholder="Bei Spotify suchen: Titel, Interpret …" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input autoFocus className="field rounded-full pl-12" placeholder="Bei Spotify suchen – oder Playlist-Link einfügen" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         <button className="chip" onClick={() => { disconnect(); setConnected(false) }}>Spotify trennen</button>
       </div>
       <p className="mt-3 text-sm text-white/50">Mitsing-Modus: Originalaufnahme mit Gesang und mitlaufendem Text. Gesang entfernen, Tonhöhe ändern und Punkte gibt es nur bei eigenen Dateien.</p>
       {err && <p className="mt-4 rounded-2xl bg-red-500/15 p-3 text-red-200">{err}</p>}
       {busy && !hits && <p className="mt-6 text-white/50">Suche …</p>}
+      {listName && hits && hits.length > 0 && (
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <h2 className="text-2xl font-black tracking-tight">{listName} <span className="text-base font-semibold text-white/50">· {hits.length} Titel</span></h2>
+          <button className="btn ml-auto" onClick={() => hits.forEach((t) => enqueue('', undefined, t))}><Icon name="queue" size={20} />Alle in die Warteschlange</button>
+        </div>
+      )}
       {hits && hits.length === 0 && <p className="mt-6 text-white/50">Nichts gefunden.</p>}
       <ul className="mt-4 space-y-2">
         {hits?.map((t) => (

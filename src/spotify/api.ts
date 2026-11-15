@@ -4,7 +4,7 @@
 import type { LyricLine, SpTrack } from '../lib/types'
 import { parseLrc } from '../lib/lrc'
 
-const SCOPES = 'streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state'
+const SCOPES = 'streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state playlist-read-private playlist-read-collaborative'
 const TOKEN_KEY = 'encore-spotify-token'
 const PKCE_KEY = 'encore-spotify-pkce'
 
@@ -91,6 +91,25 @@ const toTrack = (t: any): SpTrack => ({
 export async function searchTracks(q: string): Promise<SpTrack[]> {
   const j = await api('/search?' + new URLSearchParams({ q, type: 'track', limit: '10' }))
   return (j?.tracks?.items || []).filter((t: any) => t?.id).map(toTrack)
+}
+
+/** Erkennt einen Playlist-Link (open.spotify.com/playlist/… oder spotify:playlist:…) */
+export const playlistId = (q: string) => q.match(/playlist[/:]([A-Za-z0-9]{10,})/)?.[1] ?? null
+
+export async function playlistTracks(id: string): Promise<{ name: string; tracks: SpTrack[] }> {
+  let name = 'Playlist'
+  try { name = (await api('/playlists/' + id + '?fields=name'))?.name || name } catch { /* Name ist nur Zierde */ }
+  const tracks: SpTrack[] = []
+  for (let offset = 0; offset < 300; offset += 50) {
+    const j = await api('/playlists/' + id + '/items?' + new URLSearchParams({ limit: '50', offset: String(offset) }))
+    const items: any[] = j?.items || []
+    for (const it of items) {
+      const t = it?.item ?? it?.track
+      if (t?.id && (t.type ?? 'track') === 'track') tracks.push(toTrack(t))
+    }
+    if (!j?.next || items.length === 0) break
+  }
+  return { name, tracks }
 }
 
 export const playOn = (uri: string, deviceId?: string) =>
