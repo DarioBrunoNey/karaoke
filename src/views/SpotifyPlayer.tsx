@@ -23,7 +23,6 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   const [idle, setIdle] = useState(false)
   const [device, setDevice] = useState('')
   const tr = useRef<Transport | null>(null)
-  const fill = useRef<HTMLSpanElement>(null)
   const bar = useRef<HTMLDivElement>(null)
   const clock = useRef<HTMLSpanElement>(null)
   const off = useRef(offset)
@@ -61,12 +60,9 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
       if (!t) return
       const pos = t.time(), dur = t.duration()
       const lt = pos - off.current
-      const i = lineAt(lines, lt + 0.08)
+      // Zeile eine Vierteltakt-Länge vor dem Einsatz zeigen, damit man rechtzeitig lesen kann
+      const i = lineAt(lines, lt + 0.3)
       if (i !== idx) { idx = i; setLineIdx(i) }
-      if (fill.current && i >= 0) {
-        const a = lines[i].t, b = Math.min(lines[i + 1]?.t ?? a + 6, a + 10)
-        fill.current.style.setProperty('--p', `${Math.max(0, Math.min(1, (lt - a) / Math.max(0.3, b - a))) * 100}%`)
-      }
       if (bar.current) bar.current.style.width = `${(pos / Math.max(1, dur)) * 100}%`
       if (clock.current) clock.current.textContent = `${fmtTime(pos)} / ${fmtTime(dur)}`
       if (pos > 2) begun = true
@@ -162,7 +158,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
           <div className="flex w-full max-w-[1600px] flex-col items-center gap-[2.2vh]">
             <p className="h-[1.3em] truncate text-[clamp(1rem,2.6vw,2.6rem)] font-semibold text-white/25">{lineIdx > 0 ? lines[lineIdx - 1].text : ''}</p>
             <p key={lineIdx} className="lyric-enter text-balance text-[clamp(2rem,6.2vw,6.5rem)] font-black leading-[1.08] tracking-tight drop-shadow-[0_4px_30px_rgba(0,0,0,.5)]">
-              {cur ? <span ref={fill} className="lyric-fill">{cur.text}</span> : <span className="text-white/30">♪</span>}
+              {cur ? <span className="text-white">{cur.text}</span> : <span className="text-white/30">♪</span>}
             </p>
             <p className="text-balance text-[clamp(1.2rem,3.4vw,3.6rem)] font-bold leading-tight text-white/55">{lines[lineIdx + 1]?.text ?? ''}</p>
             <p className="hidden truncate text-[clamp(1rem,2.4vw,2.4rem)] font-semibold text-white/25 sm:block">{lines[lineIdx + 2]?.text ?? ''}</p>
