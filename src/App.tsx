@@ -7,6 +7,7 @@ import Scores from './views/Scores'
 import Info from './views/Info'
 import Player from './views/Player'
 import Results from './views/Results'
+import SpotifyPlayer from './views/SpotifyPlayer'
 import SongDialog from './views/SongDialog'
 
 const NAV = [
@@ -23,6 +24,7 @@ export default function App() {
 
   if (!ready) return <div className="flex h-full items-center justify-center"><div className="grad-text text-4xl font-black tracking-tight">Encore</div></div>
   if (view.name === 'player') return <><Player key={view.run} songId={view.songId} profileId={view.profileId} /><Toast msg={toast} /></>
+  if (view.name === 'spotify') return <><SpotifyPlayer key={view.run} track={view.track} profileId={view.profileId} /><Toast msg={toast} /></>
   if (view.name === 'results') return <Results view={view} />
 
   const active = profiles.find((p) => p.id === activeProfileId)

@@ -30,6 +30,7 @@ hinzufügen" bzw. „App installieren" wählen.
 | Bewertung 0–100 aus Tonhöhe, Rhythmus, Einsatz, Kontinuität + Sterne + Auszeichnung | ✔ |
 | Bibliothek, Suche, Favoriten, zuletzt gesungen, Warteschlange, Sängerprofile, Bestenliste | ✔ |
 | Vollbild, TV-Darstellung, automatisch ausblendende Bedienung, Bildschirm bleibt an, PWA/offline | ✔ |
+| Spotify-Mitsing-Modus (Originalaufnahme + synchroner Text, eigene Client-ID, nur privat) | ✔ gegen nachgebautes Spotify getestet, nicht gegen das echte |
 | Duett-Modus, Fernbedienungs-Navigation per Pfeiltasten in der Bibliothek, Handy als Fernbedienung | geplant |
 
 ## Architektur
@@ -68,7 +69,9 @@ NODE_PATH=$(npm root -g) node tests/check.mjs # Melodie-Genauigkeit, Tempo, Spri
   Developer Policy (Abschnitt III) verbietet zudem, Aufnahmen mit visuellen Inhalten zu synchronisieren.
 - **Amazon Music:** Web-API ist eine geschlossene Beta nur für bereits zugelassene Partner; kein
   Wiedergabe-SDK für fremde Apps.
-- **Legaler Weg:** Songs als kopierschutzfreie Datei kaufen (Amazon-MP3-Kauf, Qobuz, Bandcamp, iTunes) oder
+- **Mitsing-Modus:** Offizielle Wiedergabe-Steuerung (Web Playback SDK / Spotify Connect) plus Text aus LRCLIB.
+  Nur privat im Development Mode; für eine veröffentlichte/verkaufte App nicht zulässig – dort weglassen.
+- **Legaler Weg für volles Karaoke:** Songs als kopierschutzfreie Datei kaufen (Amazon-MP3-Kauf, Qobuz, Bandcamp, iTunes) oder
   fertige Karaoke-Playbacks erwerben und importieren.
 
 ## Lizenzen der verwendeten Bausteine

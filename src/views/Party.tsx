@@ -55,13 +55,13 @@ export default function Party() {
           <ol className="mt-5 space-y-2">
             {queue.map((qi, i) => {
               const song = songs.find((s) => s.id === qi.songId)
-              if (!song) return null
+              if (!song && !qi.spotify) return null
               return (
                 <li key={qi.qid} className="flex items-center gap-3 rounded-2xl border border-white/10 p-2.5">
                   <span className="w-6 text-center text-lg font-black text-white/40">{i + 1}</span>
-                  <Cover song={song} className="w-14 shrink-0 rounded-xl" />
+                  {song ? <Cover song={song} className="w-14 shrink-0 rounded-xl" /> : <img src={qi.spotify!.coverSmall || qi.spotify!.cover} alt="" className="h-14 w-14 shrink-0 rounded-xl object-cover" />}
                   <div className="min-w-0 flex-1">
-                    <p className="truncate font-bold">{song.title}</p>
+                    <p className="truncate font-bold">{song ? song.title : qi.spotify!.name}{qi.spotify && <span className="ml-2 rounded-full bg-emerald-400/20 px-2 py-0.5 text-xs text-emerald-300">Spotify</span>}</p>
                     <select aria-label="Sänger" className="mt-0.5 max-w-full cursor-pointer rounded-lg bg-white/10 px-2 py-1 text-sm" value={qi.profileId} onChange={(e) => setQueueSinger(qi.qid, e.target.value)}>
                       {profiles.map((p) => <option key={p.id} value={p.id} className="text-black">{p.name}</option>)}
                     </select>

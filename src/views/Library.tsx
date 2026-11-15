@@ -2,13 +2,13 @@ import { useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { Cover, Icon, fmtTime } from '../ui'
 import type { Song } from '../lib/types'
+import SpotifySearch from './SpotifySearch'
 
-type Tab = 'all' | 'fav' | 'recent'
+type Tab = 'all' | 'fav' | 'recent' | 'spotify'
 
 export default function Library() {
-  const { songs, importFiles, play, enqueue, updateSong, setEdit, scores, queue, playNext } = useStore()
+  const { songs, importFiles, play, enqueue, updateSong, setEdit, scores, queue, playNext, libraryTab: tab, setLibraryTab: setTab } = useStore()
   const [q, setQ] = useState('')
-  const [tab, setTab] = useState<Tab>('all')
   const file = useRef<HTMLInputElement>(null)
 
   const list = useMemo(() => {
@@ -41,16 +41,16 @@ export default function Library() {
       </section>
 
       <div className="mt-8 flex flex-wrap items-center gap-3">
-        <div className="relative min-w-60 flex-1 sm:max-w-md">
+        <div className={`relative min-w-60 flex-1 sm:max-w-md ${tab === 'spotify' ? 'hidden' : ''}`}>
           <Icon name="search" className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-white/40" />
           <input className="field rounded-full pl-12" placeholder="Song oder Interpret suchen" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
-        {([['all', 'Alle Songs'], ['fav', 'Favoriten'], ['recent', 'Zuletzt gesungen']] as [Tab, string][]).map(([t, label]) => (
+        {([['all', 'Alle Songs'], ['fav', 'Favoriten'], ['recent', 'Zuletzt gesungen'], ['spotify', 'Spotify (Mitsingen)']] as [Tab, string][]).map(([t, label]) => (
           <button key={t} className={`chip ${tab === t ? 'chip-on' : ''}`} onClick={() => setTab(t)}>{label}</button>
         ))}
       </div>
 
-      {list.length === 0 ? (
+      {tab === 'spotify' ? <SpotifySearch /> : list.length === 0 ? (
         <div className="mt-16 text-center text-white/50">
           <Icon name="music" size={56} className="mx-auto mb-4 opacity-40" />
           <p className="text-xl font-semibold">{songs.length ? 'Nichts gefunden' : 'Noch keine Songs'}</p>

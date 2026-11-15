@@ -28,7 +28,8 @@ export default function Results({ view }: { view: Extract<View, { name: 'results
     return () => cancelAnimationFrame(raf)
   }, [r.total, view.micUsed])
   if (!song) return null
-  const next = queue[0] && songs.find((s) => s.id === queue[0].songId)
+  const nextTitle = queue[0] && (queue[0].spotify?.name ?? songs.find((s) => s.id === queue[0].songId)?.title)
+  const next = nextTitle ? { title: nextTitle } : undefined
   const nextSinger = queue[0] && profiles.find((p) => p.id === queue[0].profileId)
   const C = 2 * Math.PI * 88
 

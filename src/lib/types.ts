@@ -54,4 +54,7 @@ export interface ScoreEntry {
   date: number
 }
 
-export interface QueueItem { qid: string; songId: string; profileId: string }
+export interface SpTrack { id: string; uri: string; name: string; artists: string; album: string; cover: string; coverSmall: string; durationMs: number }
+
+/** Eintrag der Warteschlange: eigener Song (songId) oder Spotify-Titel (spotify) */
+export interface QueueItem { qid: string; songId: string; profileId: string; spotify?: SpTrack }

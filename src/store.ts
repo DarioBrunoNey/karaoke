@@ -2,7 +2,8 @@ import { create } from 'zustand'
 import { Db, uid } from './lib/db'
 import { buildDemoSong } from './lib/demo'
 import { importAudioFile, isAudioFile } from './lib/importSong'
-import type { Profile, QueueItem, ScoreEntry, ScoreResult, Song } from './lib/types'
+import type { Profile, QueueItem, ScoreEntry, ScoreResult, Song, SpTrack } from './lib/types'
+import { finishLogin } from './spotify/api'
 import type { MicMode } from './audio/mic'
 import { engine } from './audio/engine'
 
@@ -12,8 +13,9 @@ export interface Settings {
   micOffsetMs: number
   volume: number
   demucsUrl: string
+  spotifyClientId: string
 }
-const DEFAULTS: Settings = { micMode: 'headphones', micAsked: false, micOffsetMs: 90, volume: 0.9, demucsUrl: '' }
+const DEFAULTS: Settings = { micMode: 'headphones', micAsked: false, micOffsetMs: 90, volume: 0.9, demucsUrl: '', spotifyClientId: '' }
 const loadSettings = (): Settings => {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem('encore-settings') || '{}') } } catch { return DEFAULTS }
 }
@@ -21,6 +23,7 @@ const loadSettings = (): Settings => {
 export type View =
   | { name: 'library' } | { name: 'party' } | { name: 'scores' } | { name: 'info' }
   | { name: 'player'; songId: string; profileId: string; qid?: string; run: number }
+  | { name: 'spotify'; track: SpTrack; profileId: string; run: number }
   | { name: 'results'; songId: string; profileId: string; result: ScoreResult; micUsed: boolean; rank?: number }
 
 const COLORS = ['#ff3d81', '#38bdf8', '#facc15', '#34d399', '#a855f7', '#fb923c', '#f472b6', '#22d3ee']
@@ -35,6 +38,8 @@ interface State {
   settings: Settings
   view: View
   editSongId: string | null
+  libraryTab: 'all' | 'fav' | 'recent' | 'spotify'
+  setLibraryTab(t: 'all' | 'fav' | 'recent' | 'spotify'): void
   toast: string | null
   init(): Promise<void>
   go(v: View): void
@@ -46,7 +51,8 @@ interface State {
   addProfile(name: string): Promise<Profile>
   removeProfile(id: string): Promise<void>
   setActiveProfile(id: string): void
-  enqueue(songId: string, profileId?: string): void
+  enqueue(songId: string, profileId?: string, spotify?: SpTrack): void
+  playSpotify(track: SpTrack, profileId?: string, qid?: string): void
   dequeue(qid: string): void
   setQueueSinger(qid: string, profileId: string): void
   moveQueue(qid: string, dir: -1 | 1): void
@@ -61,7 +67,8 @@ let toastTimer = 0
 
 export const useStore = create<State>((set, get) => ({
   ready: false, songs: [], profiles: [], scores: [], queue: [], activeProfileId: '',
-  settings: loadSettings(), view: { name: 'library' }, editSongId: null, toast: null,
+  settings: loadSettings(), view: { name: 'library' }, editSongId: null, toast: null, libraryTab: 'all',
+  setLibraryTab: (libraryTab) => set({ libraryTab }),
 
   async init() {
     let [songs, profiles, scores] = await Promise.all([Db.songs(), Db.profiles(), Db.scores()])
@@ -73,6 +80,8 @@ export const useStore = create<State>((set, get) => ({
       try { const demo = await buildDemoSong(); await Db.putSong(demo); songs = [...songs, demo] } catch (e) { console.warn(e) }
     }
     const active = localStorage.getItem('encore-active') || ''
+    const login = await finishLogin()
+    if (login) { set({ libraryTab: 'spotify' }); setTimeout(() => get().say(login === 'ok' ? 'Mit Spotify verbunden' : 'Spotify-Anmeldung fehlgeschlagen'), 300) }
     set({ ready: true, songs, profiles, scores, activeProfileId: profiles.some((p) => p.id === active) ? active : profiles[0].id })
   },
 
@@ -130,7 +139,7 @@ export const useStore = create<State>((set, get) => ({
   },
   setActiveProfile(id) { localStorage.setItem('encore-active', id); set({ activeProfileId: id }) },
 
-  enqueue(songId, profileId) {
+  enqueue(songId, profileId, spotify) {
     const { queue, profiles, activeProfileId } = get()
     // Karaoke-Abend: ohne Angabe rotieren die Sänger reihum
     let pid = profileId
@@ -139,7 +148,7 @@ export const useStore = create<State>((set, get) => ({
       const idx = last ? profiles.findIndex((p) => p.id === last.profileId) : profiles.findIndex((p) => p.id === activeProfileId) - 1
       pid = profiles[(idx + 1 + profiles.length) % profiles.length].id
     }
-    set({ queue: [...queue, { qid: uid(), songId, profileId: pid }] })
+    set({ queue: [...queue, { qid: uid(), songId, profileId: pid, spotify }] })
     get().say('Zur Warteschlange hinzugefügt')
   },
   dequeue: (qid) => set({ queue: get().queue.filter((q) => q.qid !== qid) }),
@@ -158,10 +167,16 @@ export const useStore = create<State>((set, get) => ({
     if (qid) set({ queue: get().queue.filter((q) => q.qid !== qid) })
     set({ view: { name: 'player', songId, profileId: pid, qid, run: Date.now() } })
   },
+  playSpotify(track, profileId, qid) {
+    const pid = profileId ?? get().activeProfileId
+    if (qid) set({ queue: get().queue.filter((q) => q.qid !== qid) })
+    set({ view: { name: 'spotify', track, profileId: pid, run: Date.now() } })
+  },
   playNext() {
     const next = get().queue[0]
     if (!next) return false
-    get().play(next.songId, next.profileId, next.qid)
+    if (next.spotify) get().playSpotify(next.spotify, next.profileId, next.qid)
+    else get().play(next.songId, next.profileId, next.qid)
     return true
   },
 
