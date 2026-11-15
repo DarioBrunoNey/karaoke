@@ -14,6 +14,8 @@ export const AWARDS = [
   { min: 0, title: 'Mutige Seele', emoji: '🫶', text: 'Dabei sein ist alles.' },
 ]
 
+export const lineVerdict = (r: number) => (r >= 0.85 ? 'Perfekt!' : r >= 0.65 ? 'Stark!' : r >= 0.4 ? 'Okay' : 'Daneben')
+
 export type LiveState = 'none' | 'hit' | 'high' | 'low' | 'silent'
 
 interface Phrase { s: number; e: number }
@@ -67,6 +69,22 @@ export class ScoreSession {
       if (i + k < this.ref.length && this.ref[i + k] > 0) return this.ref[i + k]
     }
     return 0
+  }
+
+  /** Trefferquote (0…1) für einen Zeitabschnitt, z. B. eine Textzeile; null, wenn dort nichts zu singen war */
+  hitRatio(from: number, to: number): number | null {
+    const { ref, user, fps } = this
+    const a = Math.max(0, Math.round(from * fps)), b = Math.min(ref.length, Math.round(to * fps))
+    const W = Math.round(0.08 * fps)
+    let total = 0, hit = 0
+    for (let i = a; i < b; i++) {
+      if (ref[i] <= 0 || user[i] < 0) continue
+      total++
+      for (let j = Math.max(0, i - W); j <= Math.min(ref.length - 1, i + W); j++) {
+        if (user[j] > 0 && Math.abs(foldSemis(user[j] - ref[i])) <= 1) { hit++; break }
+      }
+    }
+    return total >= 10 ? hit / total : null
   }
 
   result(): ScoreResult {

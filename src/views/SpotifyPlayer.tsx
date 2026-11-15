@@ -3,9 +3,10 @@ import { useStore } from '../store'
 import { Icon, Modal, Stars, fmtTime } from '../ui'
 import { lineAt } from '../lib/lrc'
 import { midiToName } from '../lib/pitch'
-import { ScoreSession, type LiveState } from '../lib/scoring'
+import { ScoreSession, lineVerdict, type LiveState } from '../lib/scoring'
+import { estimateWords } from '../lib/words'
 import { freeScore } from '../lib/freeScore'
-import { parseUltraStar, syllableProgress, type UsSong } from '../lib/ultrastar'
+import { parseUltraStar, syllableProgress, type UsLine, type UsSong } from '../lib/ultrastar'
 import type { LyricLine, ScoreResult, SpTrack } from '../lib/types'
 import { engine } from '../audio/engine'
 import { mic, type MicMode } from '../audio/mic'
@@ -57,7 +58,10 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   const p = useRef({ offset, micOn, micOffset: settings.micOffsetMs / 1000 })
   p.current = { offset, micOn, micOffset: settings.micOffsetMs / 1000 }
 
-  const lines: LyricLine[] = useMemo(() => (us ? us.lines : lrc), [us, lrc])
+  // Mit Melodie-Datei sind die Silbenzeiten exakt; sonst werden die Wortzeiten aus den Zeilenzeiten geschätzt
+  const lines: UsLine[] = useMemo(() => (us ? us.lines : estimateWords(lrc)), [us, lrc])
+  const pages = useMemo(() => lines.map((l) => ({ t: l.t, e: l.syl[l.syl.length - 1]?.e ?? l.t + 3 })), [lines])
+  const [verdict, setVerdict] = useState<{ text: string; n: number } | null>(null)
   const hasRef = !!us
 
   // Neue Wertung beginnen, sobald feststeht, womit verglichen wird
@@ -138,13 +142,15 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
         const st = s.add(lt - p.current.micOffset, smp.voiced ? smp.midi : 0)
         liveRef.current = { state: st, midi: smp.voiced ? smp.midi : 0, level: smp.level }
       }
-      // ohne Silbenzeiten: Zeile kurz vor dem Einsatz zeigen; mit Melodie-Datei exakt
-      const i = lineAt(lines, lt + (hasRef ? 0.15 : 0.3))
-      if (i !== idx) { idx = i; setLineIdx(i) }
-      if (hasRef && fill.current && i >= 0 && us) fill.current.style.setProperty('--p', `${syllableProgress(us.lines[i], lt) * 100}%`)
+      const i = lineAt(lines, lt + 0.15)
+      if (i !== idx) {
+        if (idx >= 0 && hasRef && p.current.micOn) { const r = s.hitRatio(pages[idx].t - 0.2, pages[idx].e + 0.2); if (r !== null) setVerdict({ text: lineVerdict(r), n: now }) }
+        idx = i; setLineIdx(i)
+      }
+      if (fill.current && i >= 0) fill.current.style.setProperty('--p', `${syllableProgress(lines[i], lt) * 100}%`)
       if (bar.current) bar.current.style.width = `${(pos / Math.max(1, dur)) * 100}%`
       if (clock.current) clock.current.textContent = `${fmtTime(pos)} / ${fmtTime(dur)}`
-      drawLane(canvas.current, s, lt, center, liveRef.current.midi)
+      drawLane(canvas.current, s, lt, center, liveRef.current.midi, pages)
       if (pos > 2) started = true
       // Songende: anhalten, damit Spotify nicht von selbst mit anderen Titeln weiterspielt
       if (started && (pos >= dur - 0.6 || (t.paused() && pos < 0.5 && prev > dur - 5))) { cancelAnimationFrame(raf); void finishRef.current(); return }
@@ -158,7 +164,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
     }
     raf = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(raf)
-  }, [phase, lines, hasRef, us])
+  }, [phase, lines, hasRef, pages])
 
   const toggle = useCallback(() => { void tr.current?.toggle().catch(() => {}) }, [])
   const fullscreen = () => { if (document.fullscreenElement) void document.exitFullscreen(); else void document.documentElement.requestFullscreen?.().catch(() => {}) }
@@ -285,7 +291,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
           <div className="flex w-full max-w-[1600px] flex-col items-center gap-[2.2vh]">
             <p className="h-[1.3em] truncate text-[clamp(1rem,2.6vw,2.6rem)] font-semibold text-white/25">{lineIdx > 0 ? lines[lineIdx - 1].text : ''}</p>
             <p key={lineIdx} className="lyric-enter text-balance text-[clamp(2rem,6.2vw,6.5rem)] font-black leading-[1.08] tracking-tight drop-shadow-[0_4px_30px_rgba(0,0,0,.5)]">
-              {cur ? (hasRef ? <span ref={fill} className="lyric-fill">{cur.text}</span> : <span className="text-white">{cur.text}</span>) : <span className="text-white/30">♪</span>}
+              {cur ? <span ref={fill} className="lyric-fill">{cur.text}</span> : <span className="text-white/30">♪</span>}
             </p>
             <p className="text-balance text-[clamp(1.2rem,3.4vw,3.6rem)] font-bold leading-tight text-white/55">{lines[lineIdx + 1]?.text ?? ''}</p>
             <p className="hidden truncate text-[clamp(1rem,2.4vw,2.4rem)] font-semibold text-white/25 sm:block">{lines[lineIdx + 2]?.text ?? ''}</p>
@@ -300,13 +306,14 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
       {/* Stimme: Tonhöhen-Bahn */}
       {phase === 'ready' && micOn && (
         <div className="relative z-10 mx-auto w-full max-w-[1600px] px-4 sm:px-8">
-          <div className="relative h-[16vh] min-h-24 overflow-hidden rounded-3xl border border-white/10 bg-black/30">
+          <div className="relative h-[22vh] min-h-28 overflow-hidden rounded-3xl border border-white/10 bg-black/30">
             <canvas ref={canvas} className="h-full w-full" />
             <div className="pointer-events-none absolute left-4 top-3 flex items-center gap-3">
               <span data-testid="live-state" className={`text-xl font-black sm:text-2xl ${liveColor}`}>{liveLabel}</span>
               {live.note && <span data-testid="live-note" className="rounded-full bg-white/10 px-3 py-0.5 font-mono text-sm font-bold">{live.note}</span>}
             </div>
             {!hasRef && <button className="absolute right-3 top-3 cursor-pointer rounded-full bg-white/10 px-3 py-1 text-sm font-semibold text-white/70 hover:bg-white/20" onClick={() => setShowMelody(true)}>Ohne Originalmelodie · Melodie laden</button>}
+            {verdict && <span key={verdict.n} className="pointer-events-none absolute right-4 bottom-3 rounded-full bg-white/15 px-4 py-1 text-xl font-black [animation:pop_.4s_both,fade-out_.5s_1.4s_forwards]">{verdict.text}</span>}
             <div className="absolute bottom-3 left-4 h-1.5 w-24 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-emerald-300 transition-[width] duration-100" style={{ width: `${live.level * 100}%` }} /></div>
           </div>
         </div>

@@ -100,3 +100,15 @@ import { parseUltraStar, syllableProgress } from '../src/lib/ultrastar.ts'
   assert.ok(p > 0.25 && p < 0.35, 'Silbenfortschritt ' + p)
   console.log('UltraStar OK')
 }
+{
+  const { estimateWords, syllables } = await import('../src/lib/words.ts')
+  assert.equal(syllables('Götterfunken'), 4); assert.equal(syllables('and'), 1)
+  // dichte Zeilen (3 s) und eine Zeile mit langer Pause (9 s) – die Füllung darf die Pause nicht mitnehmen
+  const ls = [0, 3, 6, 15, 18].map((t) => ({ t, text: 'When we are grey and old' }))
+  const w = estimateWords(ls)
+  const end = (k: number) => w[k].syl[w[k].syl.length - 1].e - w[k].t
+  console.log('Wortschätzung: Zeilendauer dicht', end(0).toFixed(2), '· vor Pause', end(2).toFixed(2))
+  assert.ok(end(0) > 2.4 && end(0) <= 2.9); assert.ok(end(2) < 3.4, 'Pause wird nicht mitgefüllt')
+  assert.equal(w[0].syl.length, 6)
+  console.log('Wörter OK')
+}

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { engine } from '../audio/engine'
 import { mic, type MicMode } from '../audio/mic'
-import { ScoreSession, type LiveState } from '../lib/scoring'
+import { ScoreSession, lineVerdict, type LiveState } from '../lib/scoring'
 import { lineAt } from '../lib/lrc'
 import { midiToName } from '../lib/pitch'
 import { drawLane as draw } from './pitchLane'
@@ -30,6 +30,7 @@ export default function Player({ songId, profileId }: { songId: string; profileI
   const [showMic, setShowMic] = useState(false)
   const [live, setLive] = useState<{ score: number; state: LiveState; note: string; level: number }>({ score: 0, state: 'none', note: '', level: 0 })
   const [idle, setIdle] = useState(false)
+  const [verdict, setVerdict] = useState<{ text: string; n: number } | null>(null)
 
   const session = useRef<ScoreSession | null>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
@@ -119,6 +120,8 @@ export default function Player({ songId, profileId }: { songId: string; profileI
     })
   }, [lyrics, phase])
 
+  const pages = useMemo(() => lyrics.map((l, i) => ({ t: l.t, e: lineEnds[i] })), [lyrics, lineEnds])
+
   // Hauptschleife: Mikrofon auswerten, Text und Tonhöhenanzeige zeichnen
   useEffect(() => {
     if (phase !== 'ready') return
@@ -134,14 +137,18 @@ export default function Player({ songId, profileId }: { songId: string; profileI
         liveRef.current = { state: st, midi: smp.voiced ? smp.midi : 0, level: smp.level }
       }
       const i = lineAt(lyrics, t + 0.08)
-      if (i !== idx) { idx = i; setLineIdx(i) }
+      if (i !== idx) {
+        // Zeile zu Ende: kurze Rückmeldung, wie gut die Stimmlage getroffen wurde
+        if (idx >= 0 && p.micOn) { const r = s.hitRatio(lyrics[idx].t - 0.2, lineEnds[idx] + 0.2); if (r !== null) setVerdict({ text: lineVerdict(r), n: now }) }
+        idx = i; setLineIdx(i)
+      }
       if (fill.current && i >= 0) {
         const a = lyrics[i].t, b = lineEnds[i]
         fill.current.style.setProperty('--p', `${Math.max(0, Math.min(1, (t - a) / Math.max(0.3, b - a))) * 100}%`)
       }
       if (bar.current) bar.current.style.width = `${(t / Math.max(1, engine.duration)) * 100}%`
       if (clock.current) clock.current.textContent = `${fmtTime(t)} / ${fmtTime(engine.duration)}`
-      draw(canvas.current, s, t, center, liveRef.current.midi ? liveRef.current.midi - p.pitch : 0)
+      draw(canvas.current, s, t, center, liveRef.current.midi ? liveRef.current.midi - p.pitch : 0, pages)
       if (now - lastUi > 250) {
         lastUi = now
         const l = liveRef.current
@@ -150,7 +157,7 @@ export default function Player({ songId, profileId }: { songId: string; profileI
     }
     raf = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(raf)
-  }, [phase, lyrics, lineEnds])
+  }, [phase, lyrics, lineEnds, pages])
 
   const toggle = useCallback(() => {
     if (phase !== 'ready') return
@@ -250,7 +257,7 @@ export default function Player({ songId, profileId }: { songId: string; profileI
       {/* Tonhöhen-Anzeige */}
       {phase === 'ready' && (
         <div className="relative z-10 mx-auto w-full max-w-[1600px] px-4 sm:px-8">
-          <div className="relative h-[16vh] min-h-24 overflow-hidden rounded-3xl border border-white/10 bg-black/30">
+          <div className="relative h-[22vh] min-h-28 overflow-hidden rounded-3xl border border-white/10 bg-black/30">
             <canvas ref={canvas} className="h-full w-full" />
             <div className="pointer-events-none absolute left-4 top-3 flex items-center gap-3">
               {micOn ? (
@@ -260,6 +267,7 @@ export default function Player({ songId, profileId }: { songId: string; profileI
                 </>
               ) : <span className="font-semibold text-white/50">Mikrofon aus – keine Bewertung</span>}
             </div>
+            {verdict && <span key={verdict.n} className="pop pointer-events-none absolute right-4 top-3 rounded-full bg-white/15 px-4 py-1 text-xl font-black [animation:pop_.4s_both,fade-out_.5s_1.4s_forwards]">{verdict.text}</span>}
             {micOn && <div className="absolute bottom-3 left-4 h-1.5 w-24 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-emerald-300 transition-[width] duration-100" style={{ width: `${live.level * 100}%` }} /></div>}
           </div>
         </div>
