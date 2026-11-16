@@ -65,32 +65,75 @@ export function alignFit(us: UsSong, lrc: LyricLine[]): Fit | null {
     for (const l of L) if (l.n.startsWith(key) || un.startsWith(l.n.slice(0, 10))) pairs.push([u.t, l.t, ui])
   })
   if (pairs.length < 3) return null
-  let best = { a: 1, b: 0, n: 0 }
-  for (let k = -30; k <= 30; k++) {
-    const a = 1 + k * 0.002
+  // Für ein Tempo a: Wie viele Notenzeilen lassen sich mit EINEM Versatz erklären – und wie viele mit dem zweitbesten?
+  const vote = (a: number) => {
     const bins = new Map<number, Set<number>>()
     for (const [tu, tl, ui] of pairs) {
       const q = Math.round((tl - a * tu) / 0.3)
       for (const bb of [q - 1, q, q + 1]) { if (!bins.has(bb)) bins.set(bb, new Set()); bins.get(bb)!.add(ui) }
     }
-    for (const [q, set] of bins) {
-      // bei Gleichstand gewinnt das Tempo, das am nächsten am Original liegt
-      if (set.size > best.n || (set.size === best.n && Math.abs(a - 1) < Math.abs(best.a - 1))) best = { a, b: q * 0.3, n: set.size }
+    let top = { q: 0, n: 0 }
+    for (const [q, set] of bins) if (set.size > top.n) top = { q, n: set.size }
+    let second = 0
+    for (const [q, set] of bins) if (Math.abs(q - top.q) > 3 && set.size > second) second = set.size
+    return { a, b: top.q * 0.3, n: top.n, second }
+  }
+  // Zuerst das Originaltempo. Ein anderes Tempo nur, wenn es deutlich mehr Zeilen erklärt – sonst liefe der Text
+  // bei Songs mit anderem Aufbau (längeres Intro, anderes Solo) im falschen Tempo.
+  let best = vote(1)
+  for (let k = -30; k <= 30; k++) {
+    if (k === 0) continue
+    const v = vote(1 + k * 0.002)
+    const ref = best.a === 1 ? best.n * 1.15 + 2 : best.n
+    if (v.n > ref || (best.a !== 1 && v.n === best.n && Math.abs(v.a - 1) < Math.abs(best.a - 1))) best = v
+  }
+  // Bei Texten mit vielen gleichen Zeilen passen auch falsche Verschiebungen auf etliche Zeilen.
+  // Die Lösung muss deshalb klar vor der zweitbesten liegen.
+  if (best.n < best.second * 1.3 + 1) return null
+  // Feinschliff: Tempo in kleinen Schritten um die gefundene Lösung variieren, den Versatz jeweils als Median der
+  // passenden Paare bestimmen, und die Variante nehmen, die die meisten Zeilen eng (±0,25 s) erklärt.
+  // (Eine Ausgleichsgerade wäre hier anfällig: Bei wiederholten Zeilen ziehen falsche Paare die Steigung weg.)
+  let a = best.a, bb = best.b
+  let inl: [number, number, number][] = []
+  let top = -1
+  for (let k = -8; k <= 8; k++) {
+    const ak = best.a + k * 0.0005
+    const near = pairs.filter(([tu, tl]) => Math.abs(tl - (ak * tu + best.b)) <= 0.9)
+    if (near.length < 3) continue
+    const res = near.map(([tu, tl]) => tl - ak * tu).sort((x, y) => x - y)
+    const bk = res[res.length >> 1]
+    const tight = pairs.filter(([tu, tl]) => Math.abs(tl - (ak * tu + bk)) <= 0.25)
+    const n = new Set(tight.map((p) => p[2])).size
+    // bei Gleichstand das Tempo, das näher an der groben Lösung liegt
+    if (n > top || (n === top && Math.abs(k) < Math.abs(Math.round((a - best.a) / 0.0005)))) { top = n; a = ak; bb = bk; inl = pairs.filter(([tu, tl]) => Math.abs(tl - (ak * tu + bk)) <= 0.4) }
+  }
+  // Letzter Schliff: Ausgleichsgerade nur über eindeutige, eng passende Paare (je Notenzeile das beste) – und nur
+  // übernehmen, wenn sie nah an der gefundenen Lösung bleibt.
+  {
+    const per = new Map<number, [number, number]>()
+    for (const [tu, tl, ui] of pairs) {
+      const r = Math.abs(tl - (a * tu + bb))
+      if (r <= 0.3 && (!per.has(ui) || r < Math.abs(per.get(ui)![1] - (a * per.get(ui)![0] + bb)))) per.set(ui, [tu, tl])
+    }
+    const pts = [...per.values()]
+    if (pts.length >= 6) {
+      const mx = pts.reduce((x, q) => x + q[0], 0) / pts.length, my = pts.reduce((x, q) => x + q[1], 0) / pts.length
+      let sxy = 0, sxx = 0
+      for (const [x, y] of pts) { sxy += (x - mx) * (y - my); sxx += (x - mx) * (x - mx) }
+      const slope = sxx > 0 ? sxy / sxx : a
+      if (Math.sqrt(sxx / pts.length) > 25 && Math.abs(slope - a) < 0.003) {
+        a = slope
+        const res = pts.map(([x, y]) => y - a * x).sort((x, y) => x - y)
+        bb = res[res.length >> 1]
+        inl = pairs.filter(([tu, tl]) => Math.abs(tl - (a * tu + bb)) <= 0.4)
+      }
     }
   }
-  // Feinschliff: Ausgleichsgerade über alle Paare, die zur gefundenen Lösung passen
-  let { a, b } = best
-  let inl: [number, number, number][] = []
-  for (let it = 0; it < 3; it++) {
-    inl = pairs.filter(([tu, tl]) => Math.abs(tl - (a * tu + b)) <= (it === 0 ? 0.6 : 0.4))
-    if (inl.length < 3) break
-    const mx = inl.reduce((x, p) => x + p[0], 0) / inl.length, my = inl.reduce((x, p) => x + p[1], 0) / inl.length
-    let sxy = 0, sxx = 0
-    for (const [x, y] of inl) { sxy += (x - mx) * (y - my); sxx += (x - mx) * (x - mx) }
-    if (sxx > 100) { a = sxy / sxx; b = my - a * mx } else { a = 1; b = my - mx }
-  }
+  const b = bb
   const lines = new Set(inl.map((p) => p[2])).size
-  if (lines < Math.min(3, usable) || lines < usable * 0.4 || Math.abs(a - 1) > 0.07) return null
+  // Die Notendatei teilt Zeilen oft feiner auf als der Liedtext – dann kann höchstens jede Textzeile einmal passen.
+  const reachable = Math.min(usable, L.length)
+  if (lines < Math.min(3, usable) || lines < reachable * 0.4 || Math.abs(a - 1) > 0.07) return null
   return { a, b, inliers: lines, usable }
 }
 
