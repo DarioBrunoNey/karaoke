@@ -12,7 +12,7 @@ import { parseUltraStar, syllableProgress, type UsLine, type UsSong } from '../l
 import type { LyricLine, ScoreResult, SpTrack } from '../lib/types'
 import { engine } from '../audio/engine'
 import { mic, type MicMode } from '../audio/mic'
-import { browserTransport, lyricsFor, remoteTransport, resetSpotifyPlayer, type Transport } from '../spotify/api'
+import { browserTransport, lyricsFor, otherDevices, remoteTransport, resetSpotifyPlayer, type Transport } from '../spotify/api'
 import { diag } from '../lib/diag'
 import { findMelody } from '../spotify/melodyDb'
 import { announceTurn, hasPhone, phoneSample, resetPhoneGates, sendToPhone } from '../remote/host'
@@ -147,15 +147,38 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
     try {
       setTries(0)
       const onTry = (n: number) => { if (run === startRun.current) setTries(n) }
-      const open = () => (mode === 'browser' ? browserTransport(track, settings.volume, onTry) : remoteTransport(track))
-      // Scheitert der Start, einmal von selbst mit einem ganz frischen Player neu ansetzen – erst danach eine Meldung zeigen
-      const t = await open().catch((e) => {
-        const status = (e as { status?: number }).status
-        if (mode !== 'browser' || status === 401 || status === 403 || run !== startRun.current) throw e
-        diag('Zweiter Anlauf mit frischem Player')
-        resetSpotifyPlayer()
-        return open()
-      })
+      const fatal = (e: unknown) => { const st = (e as { status?: number }).status; return st === 401 || st === 403 || run !== startRun.current }
+      // Zwei Wege zur Musik: der Player in diesem Browser – oder ein anderes Spotify-Gerät dieses Kontos
+      // (etwa die Spotify-App auf demselben Handy), das die App fernsteuert. Welcher zuletzt geklappt hat, wird gemerkt.
+      const others = await otherDevices()
+      const viaOther = async () => {
+        const dev = (await otherDevices())[0] ?? others[0]
+        if (!dev) throw new Error('kein anderes Spotify-Gerät erreichbar')
+        const r = await remoteTransport(track, dev)
+        localStorage.setItem('encore-sp-weg', 'remote')
+        say(`Musik läuft über Spotify auf „${dev.name}“`)
+        return r
+      }
+      const viaBrowser = async (limit: number) => {
+        const r = await browserTransport(track, settings.volume, onTry, limit)
+        localStorage.setItem('encore-sp-weg', 'browser')
+        return r
+      }
+      let t: Transport
+      if (mode === 'remote') t = await viaOther().catch(() => remoteTransport(track))
+      else if (localStorage.getItem('encore-sp-weg') === 'remote' && others.length) {
+        // hier hat zuletzt nur das andere Gerät funktioniert – gleich damit beginnen
+        t = await viaOther().catch((e) => { if (fatal(e)) throw e; return viaBrowser(22000) })
+      } else {
+        // Browser zuerst; gibt es ein anderes Gerät, nicht lange zögern
+        t = await viaBrowser(others.length ? 9000 : 22000).catch(async (e) => {
+          if (fatal(e)) throw e
+          if (others.length) { diag('Browser-Player kam nicht zustande – weiche auf anderes Gerät aus'); return viaOther() }
+          diag('Zweiter Anlauf mit frischem Player')
+          resetSpotifyPlayer()
+          return viaBrowser(22000)
+        })
+      }
       // inzwischen wurde ein anderer Weg gewählt (z. B. „anderes Gerät") – diesen Start verwerfen
       if (run !== startRun.current) { t.destroy(); return }
       tr.current = t
@@ -508,7 +531,8 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
           <div className="glass max-w-xl p-8">
             <p className="text-2xl font-bold">Wiedergabe in diesem Browser nicht möglich</p>
             <p className="mt-2 text-white/65">{error}</p>
-            <p className="mt-2 text-white/65">Alternative: Spotify auf dem Fernseher, Handy oder einer Box öffnen – die App steuert dann dieses Gerät und zeigt hier den Text.</p>
+            <p className="mt-2 text-white/65">So geht es sicher: Öffne die <b className="text-white">Spotify-App</b> auf diesem Gerät (oder auf Handy, Laptop, Fernseher), spiel dort kurz irgendeinen Song an und komm hierher zurück. Die Karaoke-App steuert dann die Spotify-App und zeigt hier Text und Noten.</p>
+            <a className="btn mt-4" href="https://open.spotify.com" target="_blank" rel="noreferrer">Spotify öffnen</a>
             <div className="mt-6 flex flex-wrap justify-center gap-3">
               <button className="btn-primary" onClick={() => void start('remote')}>Auf anderem Spotify-Gerät abspielen</button>
               <button className="btn" onClick={() => void start('browser')}>Erneut versuchen</button>

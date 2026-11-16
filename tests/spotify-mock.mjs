@@ -12,7 +12,7 @@ async function run(mode, shot) {
   const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 }, serviceWorkers: 'block' })
   const page = await ctx.newPage()
   const errors = [], calls = []
-  let plays = 0, lists = 0
+  let plays = 0, lists = 0, remoteStart = 0
   page.on('pageerror', (e) => errors.push(String(e)))
   await page.addInitScript(({ mode, US, NOTES }) => {
     localStorage.setItem('encore-settings', JSON.stringify({ spotifyClientId: 'x'.repeat(32), micAsked: true, micMode: 'headphones' }))
@@ -48,6 +48,18 @@ async function run(mode, shot) {
   await ctx.route('https://api.spotify.com/**', (route) => {
     const u = route.request().url(); calls.push(route.request().method() + ' ' + u.replace('https://api.spotify.com/v1', ''))
     if (u.includes('/search')) return route.fulfill({ json: { tracks: { items: [track] } } })
+    // Modus „ausweich": der Browser-Player wird von Spotify nie akzeptiert, aber die Spotify-App auf dem Handy ist erreichbar
+    if (mode === 'ausweich') {
+      if (u.includes('/me/player/devices')) return route.fulfill({ json: { devices: [{ id: 'dev1', name: 'Encore Karaoke', type: 'Computer' }, { id: 'app1', name: 'Darios Handy', type: 'Smartphone', is_active: false }] } })
+      if (u.includes('/me/player/play')) {
+        if (!u.includes('device_id=app1')) return route.fulfill({ status: 404, json: { error: { status: 404, message: 'Device not found' } } })
+        remoteStart = Date.now(); return route.fulfill({ status: 204, body: '' })
+      }
+      if (/\/me\/player$/.test(u.split('?')[0]) && route.request().method() === 'GET') {
+        const ms = remoteStart ? Date.now() - remoteStart : 0
+        return route.fulfill({ json: { is_playing: ms < 14000, progress_ms: Math.min(14000, ms), item: { id: 't1', duration_ms: 14000 }, device: { name: 'Darios Handy' } } })
+      }
+    }
     // Geräteliste: im Modus „zaeh" fehlt unser Gerät beim ersten Nachsehen (wie nach Standby)
     if (u.includes('/me/player/devices')) return route.fulfill({ json: { devices: mode === 'zaeh' && (lists = (lists || 0) + 1) <= 1 ? [] : [{ id: 'dev1' }] } })
     // Modus „zaeh": Spotify kennt das Gerät zunächst nicht (wie am Handy nach längerer Pause) – die ersten Abspiel-Befehle scheitern
@@ -142,7 +154,7 @@ async function run(mode, shot) {
   await page.getByPlaceholder('Bei Spotify suchen').fill('test')
   if (shot === 's4') { await page.getByLabel('Testlied mitsingen').waitFor(); await page.waitForTimeout(500); await page.screenshot({ path: 'tests/shots/n1-suche.png' }) }
   await page.getByLabel('Testlied mitsingen').click()
-  await page.getByText('Erste Zeile').first().waitFor()
+  if (mode !== 'ausweich') await page.getByText('Erste Zeile').first().waitFor()
   if (mode === 'duell') {
     await page.mouse.move(700, 300)
     await page.getByTestId('mode').click()
@@ -235,6 +247,15 @@ async function run(mode, shot) {
     await ctx.close()
     return out
   }
+  if (mode === 'ausweich') {
+    const t0 = Date.now()
+    const line = await page.getByText('Zweite Zeile').first().waitFor({ timeout: 25000 }).then(() => 'ok').catch(() => 'kein Text')
+    const secs = Math.round((Date.now() - t0) / 1000)
+    const toast = await page.getByText('Darios Handy').count()
+    const out = { mode, total: secs, pitch: 0, state: line, note: calls.some((c) => c.includes('device_id=app1')) ? 'ok' : 'nicht ausgewichen', errors, played: true }
+    await ctx.close()
+    return out
+  }
   const want = mode === 'frei' ? 'Stimme erkannt' : mode === 'falsch' ? 'Zu hoch' : mode === 'mithoeren' ? 'Sing!' : 'Treffer'
   const state = await page.waitForFunction((w) => document.querySelector('[data-testid=live-state]')?.textContent === w, want, { timeout: 9000 }).then(() => want).catch(() => 'nie: ' + want)
   const note = await page.getByTestId('live-note').textContent({ timeout: 500 }).catch(() => '')
@@ -257,7 +278,7 @@ async function run(mode, shot) {
   return res
 }
 
-const results = await Promise.all([run('frei', 's3'), run('melodie', 's4'), run('falsch'), run('auto', 's5'), run('duell'), run('handys'), run('mithoeren'), run('lobby'), run('zaeh'), run('spaeter')])
+const results = await Promise.all([run('frei', 's3'), run('melodie', 's4'), run('falsch'), run('auto', 's5'), run('duell'), run('handys'), run('mithoeren'), run('lobby'), run('zaeh'), run('spaeter'), run('ausweich')])
 console.table(results.map(({ errors, ...r }) => r))
 const by = Object.fromEntries(results.map((r) => [r.mode, r]))
 const checks = [
@@ -274,6 +295,7 @@ const checks = [
   ['Lobby: zwei Handys scannen, Song wählen – beide singen automatisch gleichzeitig, Handy zeigt „Du singst!"', by.lobby.state === 'Du singst!' && by.lobby.note === 'ok' && by.lobby.total > 0],
   ['Spotify kennt das Gerät erst nicht: App meldet den Player neu an und startet trotzdem', by.zaeh.total >= 80 && by.zaeh.reconnects >= 2],
   ['Handy verbindet sich mitten im Song über den Mikrofon-Dialog: sein Besitzer singt sofort weiter', by.spaeter.state === 'ok' && by.spaeter.note === 'ok'],
+  ['Browser-Player kommt nicht zustande: App weicht von selbst auf die Spotify-App aus (nach ' + by.ausweich.total + ' s läuft der Text)', by.ausweich.state === 'ok' && by.ausweich.note === 'ok' && by.ausweich.total <= 20],
   ['keine Browser-Fehler', results.every((r) => r.errors.length === 0)],
 ]
 for (const [n, ok] of checks) console.log(ok ? '✓' : '✗', n)

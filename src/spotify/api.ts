@@ -312,9 +312,9 @@ export function activateSpotify() { try { void livePlayer?.activateElement?.() }
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /** Wiedergabe direkt in diesem Browser (Web Playback SDK, nur Premium). */
-export async function browserTransport(track: SpTrack, volume: number, onTry?: (n: number) => void): Promise<Transport> {
+export async function browserTransport(track: SpTrack, volume: number, onTry?: (n: number) => void, limitMs = 22000): Promise<Transport> {
   const t0 = performance.now()
-  const LIMIT = 22000 // länger soll niemand auf den Start warten – dann lieber eine klare Meldung
+  const LIMIT = limitMs // länger soll niemand auf den Start warten – dann lieber ein anderer Weg oder eine klare Meldung
   let sh = await ensurePlayer(volume)
   let pos = 0, at = performance.now(), paused = true, dur = track.durationMs
   const started = performance.now()
@@ -396,15 +396,30 @@ export async function browserTransport(track: SpTrack, volume: number, onTry?: (
   }
 }
 
+export interface SpDevice { id: string; name: string; type: string; active: boolean }
+
+/** Andere Spotify-Geräte dieses Kontos, die gerade erreichbar sind (Spotify-App auf Handy/Laptop, Fernseher, Box) */
+export async function otherDevices(): Promise<SpDevice[]> {
+  try {
+    const d = await api('/me/player/devices')
+    return ((d?.devices as any[]) || [])
+      .filter((x) => x.id && !x.is_restricted && x.name !== 'Encore Karaoke')
+      .map((x) => ({ id: x.id as string, name: x.name as string, type: x.type as string, active: !!x.is_active }))
+      .sort((a, b) => Number(b.active) - Number(a.active))
+  } catch { return [] }
+}
+
 /** Wiedergabe auf einem anderen Spotify-Gerät (Fernseher, Handy, Box) über Spotify Connect; Position per Abfrage. */
-export async function remoteTransport(track: SpTrack): Promise<Transport> {
-  try { await playOn(track.uri) }
+export async function remoteTransport(track: SpTrack, device?: SpDevice): Promise<Transport> {
+  diag(`Start „${track.name}“ über anderes Gerät${device ? ' „' + device.name + '“' : ''}`)
+  try { await playOn(track.uri, device?.id) }
   catch (e) {
     const err = e as Error & { status?: number; reason?: string }
     if (err.status === 404 || err.reason === 'NO_ACTIVE_DEVICE') throw new Error('Kein aktives Spotify-Gerät gefunden. Öffne Spotify auf dem Fernseher oder Handy, starte kurz einen beliebigen Song und versuche es erneut.')
     throw e
   }
-  let pos = 0, at = performance.now(), paused = false, dur = track.durationMs, name = 'Spotify-Gerät', stopped = false
+  let pos = 0, at = performance.now(), paused = false, dur = track.durationMs, name = device?.name ?? 'Spotify-Gerät', stopped = false
+  diag('Wiedergabe über anderes Gerät gestartet')
   const poll = async () => {
     const t0 = performance.now()
     try {
