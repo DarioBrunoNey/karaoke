@@ -5,6 +5,8 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
   base: './',
+  // Stand der App, sichtbar unter „Hilfe" – so lässt sich prüfen, ob ein Gerät die aktuelle Version hat
+  define: { __BUILD__: JSON.stringify(new Date().toLocaleString('de-DE', { timeZone: 'Europe/Berlin', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })) },
   plugins: [
     react(),
     tailwindcss(),

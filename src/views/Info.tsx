@@ -61,6 +61,7 @@ export default function Info() {
         </label>
         <p className="text-sm text-white/50">Hinweis: Bearbeitung nur für den privaten Gebrauch eigener, legal erworbener Dateien. Öffentliche Aufführungen (Lokal, Veranstaltung, Gästebereich) benötigen eine GEMA-Lizenz.</p>
       </Card>
+      <p data-testid="build" className="text-sm text-white/40 lg:col-span-2">App-Stand: {__BUILD__} Uhr · aktualisiert sich selbst; bei Zweifeln die Seite neu laden.</p>
     </div>
   )
 }
