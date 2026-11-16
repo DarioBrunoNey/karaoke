@@ -12,7 +12,8 @@ import { parseUltraStar, syllableProgress, type UsLine, type UsSong } from '../l
 import type { LyricLine, ScoreResult, SpTrack } from '../lib/types'
 import { engine } from '../audio/engine'
 import { mic, type MicMode } from '../audio/mic'
-import { browserTransport, lyricsFor, remoteTransport, type Transport } from '../spotify/api'
+import { browserTransport, lyricsFor, remoteTransport, resetSpotifyPlayer, type Transport } from '../spotify/api'
+import { diag } from '../lib/diag'
 import { findMelody } from '../spotify/melodyDb'
 import { announceTurn, hasPhone, phoneSample, resetPhoneGates, sendToPhone } from '../remote/host'
 import PhonePanel from './PhonePanel'
@@ -143,7 +144,16 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
     const run = ++startRun.current
     try {
       setTries(0)
-      const t = mode === 'browser' ? await browserTransport(track, settings.volume, (n) => { if (run === startRun.current) setTries(n) }) : await remoteTransport(track)
+      const onTry = (n: number) => { if (run === startRun.current) setTries(n) }
+      const open = () => (mode === 'browser' ? browserTransport(track, settings.volume, onTry) : remoteTransport(track))
+      // Scheitert der Start, einmal von selbst mit einem ganz frischen Player neu ansetzen – erst danach eine Meldung zeigen
+      const t = await open().catch((e) => {
+        const status = (e as { status?: number }).status
+        if (mode !== 'browser' || status === 401 || status === 403 || run !== startRun.current) throw e
+        diag('Zweiter Anlauf mit frischem Player')
+        resetSpotifyPlayer()
+        return open()
+      })
       // inzwischen wurde ein anderer Weg gewählt (z. B. „anderes Gerät") – diesen Start verwerfen
       if (run !== startRun.current) { t.destroy(); return }
       tr.current = t
@@ -151,6 +161,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
       setPhase('ready')
     } catch (e) {
       if (run !== startRun.current) return
+      diag('Fehlermeldung gezeigt: ' + ((e as Error).message || 'unbekannt'))
       setError((e as Error).message || 'Wiedergabe nicht möglich')
       setPhase('error')
     }

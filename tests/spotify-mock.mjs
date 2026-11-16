@@ -12,7 +12,7 @@ async function run(mode, shot) {
   const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 }, serviceWorkers: 'block' })
   const page = await ctx.newPage()
   const errors = [], calls = []
-  let plays = 0
+  let plays = 0, lists = 0
   page.on('pageerror', (e) => errors.push(String(e)))
   await page.addInitScript(({ mode, US, NOTES }) => {
     localStorage.setItem('encore-settings', JSON.stringify({ spotifyClientId: 'x'.repeat(32), micAsked: true, micMode: 'headphones' }))
@@ -48,6 +48,8 @@ async function run(mode, shot) {
   await ctx.route('https://api.spotify.com/**', (route) => {
     const u = route.request().url(); calls.push(route.request().method() + ' ' + u.replace('https://api.spotify.com/v1', ''))
     if (u.includes('/search')) return route.fulfill({ json: { tracks: { items: [track] } } })
+    // Geräteliste: im Modus „zaeh" fehlt unser Gerät beim ersten Nachsehen (wie nach Standby)
+    if (u.includes('/me/player/devices')) return route.fulfill({ json: { devices: mode === 'zaeh' && (lists = (lists || 0) + 1) <= 1 ? [] : [{ id: 'dev1' }] } })
     // Modus „zaeh": Spotify kennt das Gerät zunächst nicht (wie am Handy nach längerer Pause) – die ersten Abspiel-Befehle scheitern
     if (mode === 'zaeh' && u.includes('/me/player/play') && (plays = (plays || 0) + 1) <= 4) return route.fulfill({ status: 404, json: { error: { status: 404, message: 'Device not found' } } })
     // wie beim echten Spotify beginnt die Wiedergabe erst mit dem Abspiel-Befehl – auf dem bereits angemeldeten Gerät

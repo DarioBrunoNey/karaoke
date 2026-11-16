@@ -3,6 +3,7 @@
 // Die App steuert nur die Wiedergabe; auf das Audiosignal gibt es keinen Zugriff (und es wird keiner versucht).
 import type { LyricLine, SpTrack } from '../lib/types'
 import { parseLrc } from '../lib/lrc.ts'
+import { diag } from '../lib/diag.ts'
 
 const SCOPES = 'streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state playlist-read-private playlist-read-collaborative'
 const TOKEN_KEY = 'encore-spotify-token'
@@ -235,14 +236,19 @@ function ensurePlayer(volume: number): Promise<Shared> {
       setTimeout(() => reject(new Error('Spotify-Player wurde nicht bereit')), 12000)
     })
     livePlayer = player
+    diag('Spotify-Player angemeldet')
     return sh
   })()
   shared = p
-  p.catch(() => { if (shared === p) shared = null })
+  p.catch((e) => { diag('Anmeldung des Players gescheitert: ' + (e as Error).message); if (shared === p) shared = null })
   return p
 }
 
+/** Player verwerfen – der nächste Start meldet einen frischen an */
+export function resetSpotifyPlayer() { dropPlayer() }
+
 function dropPlayer() {
+  diag('Spotify-Player verworfen')
   try { livePlayer?.disconnect() } catch { /* schon getrennt */ }
   livePlayer = null; shared = null
 }
@@ -290,6 +296,22 @@ export async function browserTransport(track: SpTrack, volume: number, onTry?: (
   attach()
   try { await sh.player.activateElement?.() } catch { /* nur auf Mobilgeräten nötig */ }
 
+  // Kennt Spotify unser Gerät überhaupt (noch)? Nach Standby oder langer Pause ist es oft still verschwunden –
+  // dann sofort frisch anmelden, statt Abspiel-Befehle an ein Gerät zu schicken, das es nicht mehr gibt.
+  const listed = async (): Promise<boolean | null> => {
+    try { const d = await api('/me/player/devices'); return ((d?.devices as { id: string }[]) || []).some((x) => x.id === sh.deviceId) }
+    catch { return null } // unbekannt – einfach versuchen
+  }
+  diag(`Start „${track.name}“`)
+  let known = await listed()
+  if (known === false) {
+    diag('Gerät bei Spotify nicht (mehr) bekannt – neu anmelden')
+    dropPlayer(); sh = await ensurePlayer(volume); attach()
+    try { await sh.player.activateElement?.() } catch { /* nur mobil */ }
+    for (let k = 0; k < 8 && known !== true && performance.now() - t0 < 12000; k++) { await wait(600); known = await listed() }
+    diag(known ? 'Gerät jetzt bekannt' : 'Gerät weiterhin nicht gelistet – trotzdem versuchen')
+  }
+
   let lastErr: unknown
   for (let i = 0; i < 10; i++) {
     if (performance.now() - t0 > LIMIT) { lastErr = lastErr ?? new Error('Spotify hat nicht rechtzeitig geantwortet'); break }
@@ -302,10 +324,12 @@ export async function browserTransport(track: SpTrack, volume: number, onTry?: (
       }
       await playOn(track.uri, sh.deviceId)
       lastErr = undefined
+      diag(`Wiedergabe gestartet (Versuch ${i + 1}, ${Math.round(performance.now() - t0)} ms)`)
       break
     } catch (e) {
       lastErr = e
       const status = (e as { status?: number }).status
+      diag(`Versuch ${i + 1} gescheitert: ${status ?? ''} ${(e as Error).message}`)
       if (status === 401 || status === 403) break // Anmeldung/Premium – Wiederholen hilft nicht
       await wait(400 + i * 200)
       // erst das Gerät aktiv bei Spotify anmelden; hilft das nicht, den Player komplett neu aufbauen (frische Geräte-ID)
@@ -313,7 +337,7 @@ export async function browserTransport(track: SpTrack, volume: number, onTry?: (
       if (i === 2 || i === 6) { dropPlayer(); sh = await ensurePlayer(volume); attach(); try { await sh.player.activateElement?.() } catch { /* nur mobil */ } }
     }
   }
-  if (lastErr) { sh.onState = null; throw lastErr }
+  if (lastErr) { sh.onState = null; diag('Start aufgegeben: ' + (lastErr as Error).message); throw lastErr }
   busyPlaying = true
 
   // Statusmeldungen kommen nur bei Änderungen. Damit Puffern/Nachladen den Text nicht verschiebt,

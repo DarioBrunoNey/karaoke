@@ -1,5 +1,6 @@
 import { useStore } from '../store'
 import { redirectUri } from '../spotify/api'
+import { diagClear, diagText } from '../lib/diag'
 
 const Card = ({ title, children }: { title: string; children: React.ReactNode }) => (
   <section className="glass p-6 sm:p-8"><h2 className="mb-3 text-2xl font-black tracking-tight">{title}</h2><div className="space-y-3 leading-relaxed text-white/70">{children}</div></section>
@@ -60,6 +61,14 @@ export default function Info() {
           <input className="field" placeholder="http://localhost:8765" value={settings.demucsUrl} onChange={(e) => setSettings({ demucsUrl: e.target.value.trim() })} />
         </label>
         <p className="text-sm text-white/50">Hinweis: Bearbeitung nur für den privaten Gebrauch eigener, legal erworbener Dateien. Öffentliche Aufführungen (Lokal, Veranstaltung, Gästebereich) benötigen eine GEMA-Lizenz.</p>
+      </Card>
+      <Card title="Diagnose">
+        <p>Startet ein Song nicht? Hier steht, an welcher Stelle es hing. Das Protokoll liegt nur auf diesem Gerät.</p>
+        <textarea readOnly data-testid="diag" className="field scroll-thin h-44 font-mono text-xs" value={diagText() || 'Noch keine Einträge.'} />
+        <div className="flex flex-wrap gap-2">
+          <button className="btn" onClick={() => void navigator.clipboard?.writeText(diagText())}>Kopieren</button>
+          <button className="btn" onClick={() => { diagClear(); location.reload() }}>Leeren</button>
+        </div>
       </Card>
       <p data-testid="build" className="text-sm text-white/40 lg:col-span-2">App-Stand: {__BUILD__} Uhr · aktualisiert sich selbst; bei Zweifeln die Seite neu laden.</p>
     </div>
