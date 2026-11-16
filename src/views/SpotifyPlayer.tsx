@@ -14,7 +14,7 @@ import { engine } from '../audio/engine'
 import { mic, type MicMode } from '../audio/mic'
 import { browserTransport, lyricsFor, remoteTransport, type Transport } from '../spotify/api'
 import { findMelody } from '../spotify/melodyDb'
-import { hasPhone, phoneSample } from '../remote/host'
+import { announceTurn, hasPhone, phoneSample } from '../remote/host'
 import PhonePanel from './PhonePanel'
 import { drawLane } from './pitchLane'
 import { MicDialog } from './Player'
@@ -36,7 +36,10 @@ const usKey = (id: string) => 'encore-us3-' + id
 export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; profileId: string }) {
   const profile = useStore((s) => s.profiles.find((p) => p.id === profileId))
   const { settings, setSettings, go, queue, songs, profiles, playNext, playSpotify, setLibraryTab, addScore, say, phones } = useStore()
-  const [phase, setPhase] = useState<Phase>(settings.micAsked ? 'loading' : 'mic')
+  // Sind Handys verbunden, wählt die App den Ablauf selbst: ein Handy = dessen Besitzer singt,
+  // ab zwei Handys singen alle gleichzeitig. Das eingebaute Mikrofon wird dann nicht gebraucht.
+  const [auto] = useState(() => phones.map((ph) => ph.pid).slice(0, 4))
+  const [phase, setPhase] = useState<Phase>(settings.micAsked || auto.length ? 'loading' : 'mic')
   const [error, setError] = useState('')
   const [lrc, setLrc] = useState<LyricLine[]>([])
   const [plain, setPlain] = useState('')
@@ -77,12 +80,12 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   const hasRef = !!us
 
   // Mehrspieler / einzelne Abschnitte: Ablaufplan und je Sänger eine eigene Wertung
-  const [plan, setPlan] = useState<Round[] | null>(null)
-  const planRef = useRef<Round[] | null>(null)
+  const [plan, setPlan] = useState<Round[] | null>(() => (auto.length > 1 ? [{ pids: auto, s: 0, e: track.durationMs / 1000 + 5, label: '' }] : null))
+  const planRef = useRef<Round[] | null>(plan)
   const ri = useRef(0)
-  const [turn, setTurn] = useState<{ pids: string[]; label: string; next: string }>({ pids: [profileId], label: '', next: '' })
+  const [turn, setTurn] = useState<{ pids: string[]; label: string; next: string }>({ pids: auto.length ? auto : [profileId], label: '', next: '' })
   /** wer gerade singt – mehrere bei gleichzeitigem Singen mit Handy-Mikrofonen */
-  const turnPids = useRef<string[]>([profileId])
+  const turnPids = useRef<string[]>(auto.length ? auto : [profileId])
   const canvases = useRef<(HTMLCanvasElement | null)[]>([])
   const centers = useRef<{ current: number }[]>([])
   const lives = useRef(new Map<string, { state: LiveState; midi: number; level: number }>())
@@ -142,7 +145,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   useEffect(() => {
     if (phase !== 'loading' || begun.current) return
     begun.current = true
-    void startMic(settings.micMode)
+    if (!auto.length) void startMic(settings.micMode)
     void start('browser')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase])
@@ -189,6 +192,9 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
     }
     setPhase('ended')
   }, [hasRef, lines, profiles, addScore, track, sessFor])
+  // den Handys mitteilen, welcher Song läuft und wer gerade singt
+  useEffect(() => { announceTurn(phase === 'ready' ? turn.pids : [], phase === 'ended' ? '' : track.name) }, [turn.pids, phase, track.name])
+  useEffect(() => () => announceTurn([], ''), [])
   const finishRef = useRef(finish)
   finishRef.current = finish
 

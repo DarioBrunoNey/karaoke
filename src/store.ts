@@ -82,7 +82,7 @@ export const useStore = create<State>((set, get) => ({
     set({ phoneHost: { state: 'starting', url: '', error: '' } })
     try {
       const code = await startPhoneHost({
-        profileFor: async (name) => (get().profiles.find((p) => p.name.toLowerCase() === name.toLowerCase()) ?? (await get().addProfile(name))).id,
+        profileFor: async (name) => get().profiles.find((p) => p.name.toLowerCase() === name.toLowerCase()) ?? (await get().addProfile(name)),
         onChange: (phones) => set({ phones }),
       })
       set({ phoneHost: { state: 'on', url: phoneUrl(code), error: '' } })

@@ -16,7 +16,7 @@ async function run(mode, shot) {
   await page.addInitScript(({ mode, US, NOTES }) => {
     localStorage.setItem('encore-settings', JSON.stringify({ spotifyClientId: 'x'.repeat(32), micAsked: true, micMode: 'headphones' }))
     localStorage.setItem('encore-spotify-token', JSON.stringify({ access: 'tok', refresh: 'ref', exp: Date.now() + 3.6e6, clientId: 'x'.repeat(32) }))
-    if (['melodie', 'falsch', 'duell', 'handys', 'mithoeren'].includes(mode)) localStorage.setItem('encore-us3-t1', US)
+    if (['melodie', 'falsch', 'duell', 'handys', 'mithoeren', 'lobby'].includes(mode)) localStorage.setItem('encore-us3-t1', US)
     navigator.mediaDevices.getUserMedia = async () => {
       const ac = new AudioContext()
       const osc = ac.createOscillator(); osc.type = 'sawtooth'
@@ -71,12 +71,51 @@ async function run(mode, shot) {
       async setVolume() {} pause() { this.paused = true } disconnect() { clearInterval(this.iv) }
     } }
     window.onSpotifyWebPlaybackSDKReady()` }))
-  await page.goto(URL + (mode === 'handys' ? '?bc' : ''))
+  await page.goto(URL + (mode === 'handys' || mode === 'lobby' ? '?bc' : ''))
   if (mode === 'duell') {
     await page.getByRole('button', { name: 'Karaoke-Abend' }).first().click()
+    await page.getByText('Jemand ohne Handy?').click()
     await page.getByPlaceholder('Name hinzufügen').fill('Anna')
     await page.getByRole('button', { name: 'Hinzufügen' }).click()
     await page.getByRole('button', { name: 'Bibliothek' }).first().click()
+  }
+  if (mode === 'lobby') {
+    // Der einfache Weg: Lobby öffnen → Handys scannen den Code → „Song aussuchen" → alle singen automatisch gleichzeitig
+    await page.getByRole('button', { name: 'Karaoke-Abend starten' }).click()
+    const url = await page.getByTestId('phone-url').textContent({ timeout: 8000 })
+    const join = async (name, midi) => {
+      const ph = await ctx.newPage()
+      ph.on('pageerror', (e) => errors.push('Handy: ' + e))
+      await ph.addInitScript((midi) => {
+        navigator.mediaDevices.getUserMedia = async () => {
+          const ac = new AudioContext(); const o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 440 * Math.pow(2, (midi - 69) / 12)
+          const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1500
+          const g = ac.createGain(); g.gain.value = 0.3; const d = ac.createMediaStreamDestination(); o.connect(lp).connect(g).connect(d); o.start(); return d.stream
+        }
+      }, midi)
+      await ph.setViewportSize({ width: 390, height: 780 })
+      await ph.goto(url)
+      await ph.screenshot({ path: 'tests/shots/l1-handy-start.png' })
+      await ph.getByPlaceholder('Dein Name').fill(name)
+      await ph.getByTestId('phone-start').click()
+      await ph.getByTestId('phone-state').waitFor()
+      return ph
+    }
+    const pa = await join('Anna', 60); await join('Ben', 64)
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid=phone-chip]').length === 2, null, { timeout: 8000 })
+    await page.waitForTimeout(700)
+    await page.screenshot({ path: 'tests/shots/l2-lobby.png' })
+    await page.getByTestId('pick-song').click()
+    await page.getByPlaceholder('Bei Spotify suchen').fill('test')
+    await page.getByLabel('Testlied mitsingen').click()
+    await page.getByTestId('lane-Ben').waitFor({ timeout: 15000 })
+    const phoneSays = await pa.waitForFunction(() => document.querySelector('[data-testid=phone-state]')?.textContent === 'Du singst!', null, { timeout: 8000 }).then(() => 'Du singst!').catch(() => 'keine Meldung')
+    await pa.screenshot({ path: 'tests/shots/l3-handy-singt.png' })
+    const micDialog = await page.getByTestId('mic-headphones').count()
+    await page.getByTestId('rank-2').waitFor({ timeout: 30000 })
+    const out = { mode, total: +(await page.getByTestId('rank-1').locator('.grad-text').textContent()), pitch: +(await page.getByTestId('rank-2').locator('.grad-text').textContent()), state: phoneSays, note: micDialog ? 'Mikrofon-Dialog erschien' : 'ok', errors, played: true }
+    await ctx.close()
+    return out
   }
   await page.getByText('Spotify (Mitsingen)').click()
   await page.getByPlaceholder('Bei Spotify suchen').fill('test')
@@ -168,7 +207,7 @@ async function run(mode, shot) {
   return res
 }
 
-const results = await Promise.all([run('frei', 's3'), run('melodie', 's4'), run('falsch'), run('auto', 's5'), run('duell'), run('handys'), run('mithoeren')])
+const results = await Promise.all([run('frei', 's3'), run('melodie', 's4'), run('falsch'), run('auto', 's5'), run('duell'), run('handys'), run('mithoeren'), run('lobby')])
 console.table(results.map(({ errors, ...r }) => r))
 const by = Object.fromEntries(results.map((r) => [r.mode, r]))
 const checks = [
@@ -181,6 +220,7 @@ const checks = [
   ['Zwei Handy-Mikrofone gleichzeitig: beide Stimmen kommen getrennt an (C4 / E4), beide bekommen Punkte', by.handys.state === 'Anna singt C4, Ben singt E4' && by.handys.total > 0 && by.handys.pitch > 0 && by.handys.note === 'ok'],
   ['Niemand singt, Mikrofon hört nur den Originalsänger aus dem Lautsprecher: keine Punkte (≤ 10)', by.mithoeren.total <= 10],
   ['Zweiter Song direkt danach startet ohne neue Anmeldung', by.melodie.again === 'ok'],
+  ['Lobby: zwei Handys scannen, Song wählen – beide singen automatisch gleichzeitig, Handy zeigt „Du singst!"', by.lobby.state === 'Du singst!' && by.lobby.note === 'ok' && by.lobby.total > 0],
   ['keine Browser-Fehler', results.every((r) => r.errors.length === 0)],
 ]
 for (const [n, ok] of checks) console.log(ok ? '✓' : '✗', n)

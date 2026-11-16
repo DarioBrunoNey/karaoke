@@ -7,7 +7,7 @@ import SpotifySearch from './SpotifySearch'
 type Tab = 'all' | 'fav' | 'recent' | 'spotify'
 
 export default function Library() {
-  const { songs, importFiles, play, enqueue, updateSong, setEdit, scores, queue, playNext, libraryTab: tab, setLibraryTab: setTab } = useStore()
+  const { songs, importFiles, play, enqueue, updateSong, setEdit, scores, queue, playNext, go, libraryTab: tab, setLibraryTab: setTab } = useStore()
   const [q, setQ] = useState('')
   const file = useRef<HTMLInputElement>(null)
 
@@ -31,9 +31,10 @@ export default function Library() {
         <div className="grad absolute -right-24 -top-24 h-72 w-72 rounded-full opacity-40 blur-3xl" />
         <p className="text-sm font-semibold uppercase tracking-[.25em] text-white/50">Deine Bühne</p>
         <h1 className="mt-2 max-w-3xl text-4xl font-black leading-tight tracking-tight sm:text-6xl">Sing los. <span className="grad-text">Ohne Extra-Mikrofon.</span></h1>
-        <p className="mt-3 max-w-2xl text-lg text-white/60">Eigene Songs hinzufügen, Gesang herausrechnen, Text mitlesen – das eingebaute Mikrofon bewertet deine Tonhöhe live.</p>
+        <p className="mt-3 max-w-2xl text-lg text-white/60">Songs aus Spotify oder eigene Dateien, Text und Noten wie im Karaoke-Spiel – das Handy ist das Mikrofon.</p>
         <div className="mt-6 flex flex-wrap gap-3">
           <button className="btn-primary px-7 py-4 text-lg" onClick={() => file.current?.click()}><Icon name="plus" />Songs hinzufügen</button>
+          <button className="btn px-7 py-4 text-lg" onClick={() => go({ name: 'party' })}><Icon name="users" />Karaoke-Abend starten</button>
           {queue.length > 0 && <button className="btn px-7 py-4 text-lg" onClick={() => playNext()}><Icon name="play" />Warteschlange starten ({queue.length})</button>}
         </div>
         <input ref={file} type="file" accept="audio/*,.mp3,.wav,.m4a,.flac,.ogg,.opus,.aac" multiple hidden
