@@ -54,6 +54,9 @@ export default function PhoneMic({ code }: { code: string }) {
 
   const joined = state === 'on' || state === 'lost'
   const who = name.trim() || 'Gast'
+  // war dieses Handy schon einmal dabei? Dann genügt ein Tipp (den verlangt der Browser fürs Mikrofon)
+  const [known] = useState(() => !!localStorage.getItem('encore-phone-name'))
+  const [edit, setEdit] = useState(false)
   return (
     <div className="relative flex min-h-full flex-col items-center overflow-hidden px-6 pb-8 pt-10 text-center">
       <div className="pointer-events-none absolute -top-40 h-96 w-96 rounded-full opacity-40 blur-3xl transition-colors duration-700" style={{ background: joined ? color : '#a855f7' }} />
@@ -61,9 +64,14 @@ export default function PhoneMic({ code }: { code: string }) {
 
       {!joined ? (
         <div className="relative flex w-full max-w-sm flex-1 flex-col justify-center">
-          <h1 className="text-4xl font-black leading-tight tracking-tight">Dein Handy wird zum <span className="grad-text">Mikrofon</span></h1>
-          <p className="mt-3 text-lg text-white/60">Wie heißt du?</p>
-          <form className="mt-4" onSubmit={(e) => { e.preventDefault(); if (name.trim() && state !== 'starting') void start() }}>
+          <h1 className="text-4xl font-black leading-tight tracking-tight">{known && !edit ? <>Willkommen zurück, <span className="grad-text">{who}</span></> : <>Dein Handy wird zum <span className="grad-text">Mikrofon</span></>}</h1>
+          {known && !edit ? (
+            <>
+              <button data-testid="phone-continue" className="btn-primary mt-6 w-full py-6 text-2xl" disabled={state === 'starting'} onClick={() => void start()}>{state === 'starting' ? 'Verbinde …' : 'Weiter singen'}</button>
+              <button className="mt-3 cursor-pointer text-sm font-semibold text-white/50 underline" onClick={() => setEdit(true)}>Nicht {who}? Namen ändern</button>
+            </>
+          ) : <p className="mt-3 text-lg text-white/60">Wie heißt du?</p>}
+          <form className={`mt-4 ${known && !edit ? 'hidden' : ''}`} onSubmit={(e) => { e.preventDefault(); if (name.trim() && state !== 'starting') void start() }}>
             <input autoFocus className="field py-4 text-center text-2xl font-bold" placeholder="Dein Name" maxLength={24} value={name} onChange={(e) => setName(e.target.value)} />
             <button data-testid="phone-start" className="btn-primary mt-4 w-full py-5 text-xl" disabled={state === 'starting' || !name.trim()}>{state === 'starting' ? 'Verbinde …' : 'Mitsingen'}</button>
           </form>

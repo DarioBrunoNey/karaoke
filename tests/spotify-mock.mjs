@@ -93,6 +93,7 @@ async function run(mode, shot) {
           const g = ac.createGain(); g.gain.value = 0.3; const d = ac.createMediaStreamDestination(); o.connect(lp).connect(g).connect(d); o.start(); return d.stream
         }
       }, midi)
+      await ph.addInitScript(() => localStorage.removeItem('encore-phone-name')) // jedes Test-Handy ist ein „neues" Gerät
       await ph.setViewportSize({ width: 390, height: 780 })
       await ph.goto(url)
       await ph.screenshot({ path: 'tests/shots/l1-handy-start.png' })
@@ -101,7 +102,18 @@ async function run(mode, shot) {
       await ph.getByTestId('phone-state').waitFor()
       return ph
     }
-    const pa = await join('Anna', 60); await join('Ben', 64)
+    const pa = await join('Anna', 60); const pb = await join('Ben', 64)
+    // Ben schließt die Seite und öffnet sie wieder: ein Tipp genügt, kein neuer Name, kein doppelter Eintrag
+    await pb.close()
+    const back = await ctx.newPage()
+    await back.addInitScript(() => { navigator.mediaDevices.getUserMedia = async () => { const ac = new AudioContext(); const o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 329.63; const g = ac.createGain(); g.gain.value = 0.3; const d = ac.createMediaStreamDestination(); o.connect(g).connect(d); o.start(); return d.stream } })
+    await back.setViewportSize({ width: 390, height: 780 })
+    await back.goto(url)
+    const welcome = await back.getByText('Willkommen zurück').count()
+    await back.screenshot({ path: 'tests/shots/l4-handy-zurueck.png' })
+    await back.getByTestId('phone-continue').click()
+    await back.getByTestId('phone-state').waitFor()
+    const rejoin = welcome ? 'ok' : 'kein Willkommen-zurück'
     await page.waitForFunction(() => document.querySelectorAll('[data-testid=phone-chip]').length === 2, null, { timeout: 8000 })
     await page.waitForTimeout(700)
     await page.screenshot({ path: 'tests/shots/l2-lobby.png' })
@@ -113,12 +125,13 @@ async function run(mode, shot) {
     await pa.screenshot({ path: 'tests/shots/l3-handy-singt.png' })
     const micDialog = await page.getByTestId('mic-headphones').count()
     await page.getByTestId('rank-2').waitFor({ timeout: 30000 })
-    const out = { mode, total: +(await page.getByTestId('rank-1').locator('.grad-text').textContent()), pitch: +(await page.getByTestId('rank-2').locator('.grad-text').textContent()), state: phoneSays, note: micDialog ? 'Mikrofon-Dialog erschien' : 'ok', errors, played: true }
+    const out = { mode, total: +(await page.getByTestId('rank-1').locator('.grad-text').textContent()), pitch: +(await page.getByTestId('rank-2').locator('.grad-text').textContent()), state: phoneSays, note: micDialog ? 'Mikrofon-Dialog erschien' : rejoin, errors, played: true }
     await ctx.close()
     return out
   }
   await page.getByText('Spotify (Mitsingen)').click()
   await page.getByPlaceholder('Bei Spotify suchen').fill('test')
+  if (shot === 's4') { await page.getByLabel('Testlied mitsingen').waitFor(); await page.waitForTimeout(500); await page.screenshot({ path: 'tests/shots/n1-suche.png' }) }
   await page.getByLabel('Testlied mitsingen').click()
   await page.getByText('Erste Zeile').first().waitFor()
   if (mode === 'duell') {
@@ -158,6 +171,7 @@ async function run(mode, shot) {
           const g = ac.createGain(); g.gain.value = 0.3; const d = ac.createMediaStreamDestination(); o.connect(lp).connect(g).connect(d); o.start(); return d.stream
         }
       }, midi)
+      await ph.addInitScript(() => localStorage.removeItem('encore-phone-name')) // jedes Test-Handy ist ein „neues" Gerät
       await ph.setViewportSize({ width: 390, height: 780 })
       await ph.goto(url)
       await ph.getByPlaceholder('Dein Name').fill(name)
@@ -192,6 +206,7 @@ async function run(mode, shot) {
   const state = await page.waitForFunction((w) => document.querySelector('[data-testid=live-state]')?.textContent === w, want, { timeout: 9000 }).then(() => want).catch(() => 'nie: ' + want)
   const note = await page.getByTestId('live-note').textContent({ timeout: 500 }).catch(() => '')
   if (shot) { await page.mouse.move(800, 300); await page.waitForTimeout(500); await page.screenshot({ path: `tests/shots/${shot}-singen.png` }) }
+  if (shot === 's4') { await page.getByTestId('settings').click(); await page.waitForTimeout(400); await page.screenshot({ path: 'tests/shots/n2-einstellungen.png' }); await page.keyboard.press('Escape') }
   await page.getByTestId('total').waitFor({ timeout: 20000 })
   await page.waitForTimeout(700)
   if (shot) await page.screenshot({ path: `tests/shots/${shot}-auswertung.png` })

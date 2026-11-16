@@ -192,6 +192,10 @@ export const useStore = create<State>((set, get) => ({
   playSpotify(track, profileId, qid) {
     void engine.init().catch(() => {}) // für das Mikrofon: AudioContext im Klick entsperren
     activateSpotify()
+    try {
+      const old: SpTrack[] = JSON.parse(localStorage.getItem('encore-sp-recent') || '[]')
+      localStorage.setItem('encore-sp-recent', JSON.stringify([track, ...old.filter((t) => t.id !== track.id)].slice(0, 18)))
+    } catch { /* nur Komfort */ }
     const pid = profileId ?? get().activeProfileId
     if (qid) set({ queue: get().queue.filter((q) => q.qid !== qid) })
     set({ view: { name: 'spotify', track, profileId: pid, run: Date.now() } })

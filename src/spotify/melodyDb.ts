@@ -39,6 +39,12 @@ function pick(list: Entry[], track: SpTrack): string | null {
   return cands[0]?.[1] ?? null
 }
 
+/** IDs der Titel, für die es Notendaten gibt (volle Anzeige mit Röhren) */
+export async function tracksWithNotes(tracks: SpTrack[]): Promise<Set<string>> {
+  const list = await index()
+  return new Set(tracks.filter((t) => pick(list, t)).map((t) => t.id))
+}
+
 export interface Fit { a: number; b: number; inliers: number; usable: number }
 
 /**

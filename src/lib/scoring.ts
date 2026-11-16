@@ -62,7 +62,9 @@ export class ScoreSession {
     const i = Math.round(t * this.fps)
     if (i < 0 || i >= this.user.length) return 'none'
     this.user[i] = midi
-    if (i - this.lastIdx > 1 && i - this.lastIdx <= 5) {
+    // Lücken bis ~¼ s mit dem letzten Wert füllen – auf langsamen Geräten (alte Laptops, Fernseher) kommen
+    // die Messwerte unregelmäßig, das darf weder die Anzeige zerhacken noch Punkte kosten
+    if (i - this.lastIdx > 1 && i - this.lastIdx <= 12) {
       const prev = this.user[this.lastIdx]
       for (let j = this.lastIdx + 1; j < i; j++) if (this.user[j] < 0) this.user[j] = prev
     }

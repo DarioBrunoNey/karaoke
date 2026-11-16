@@ -27,7 +27,7 @@ export default function Library() {
 
   return (
     <div className="pb-10">
-      <section className="glass relative mt-2 overflow-hidden p-7 sm:p-10">
+      <section className={`glass relative mt-2 overflow-hidden p-7 sm:p-10 ${tab === 'spotify' ? 'hidden' : ''}`}>
         <div className="grad absolute -right-24 -top-24 h-72 w-72 rounded-full opacity-40 blur-3xl" />
         <p className="text-sm font-semibold uppercase tracking-[.25em] text-white/50">Deine Bühne</p>
         <h1 className="mt-2 max-w-3xl text-4xl font-black leading-tight tracking-tight sm:text-6xl">Sing los. <span className="grad-text">Ohne Extra-Mikrofon.</span></h1>
@@ -41,7 +41,7 @@ export default function Library() {
           onChange={(e) => { void importFiles([...(e.target.files ?? [])]); e.target.value = '' }} />
       </section>
 
-      <div className="mt-8 flex flex-wrap items-center gap-3">
+      <div className={`flex flex-wrap items-center gap-3 ${tab === 'spotify' ? 'mt-2' : 'mt-8'}`}>
         <div className={`relative min-w-60 flex-1 sm:max-w-md ${tab === 'spotify' ? 'hidden' : ''}`}>
           <Icon name="search" className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-white/40" />
           <input className="field rounded-full pl-12" placeholder="Song oder Interpret suchen" value={q} onChange={(e) => setQ(e.target.value)} />

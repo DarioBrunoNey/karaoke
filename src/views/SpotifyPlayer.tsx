@@ -92,6 +92,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   const [liveAll, setLiveAll] = useState<Record<string, Live>>({})
   const sessions = useRef(new Map<string, ScoreSession>())
   const [showMode, setShowMode] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   /** Hinweis: das Mikrofon hört die Musik mit */
   const [bleed, setBleed] = useState(false)
   const warned = useRef(false)
@@ -325,7 +326,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
 
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || showMic || showMelody || showMode) return
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || showMic || showMelody || showMode || showSettings) return
       const t = tr.current
       if (e.code === 'Space') { e.preventDefault(); toggle() }
       else if (e.key === 'f' || e.key === 'F') fullscreen()
@@ -335,7 +336,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
     }
     window.addEventListener('keydown', k)
     return () => window.removeEventListener('keydown', k)
-  }, [toggle, leave, showMic, showMelody, showMode])
+  }, [toggle, leave, showMic, showMelody, showMode, showSettings])
 
   useEffect(() => {
     let timer = 0
@@ -346,7 +347,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
     return () => { clearTimeout(timer); for (const ev of evs) window.removeEventListener(ev, wake) }
   }, [])
 
-  const hideUi = !IS_TV && idle && phase === 'ready' && !paused && !showMic && !showMelody && !showMode
+  const hideUi = !IS_TV && idle && phase === 'ready' && !paused && !showMic && !showMelody && !showMode && !showSettings
   const singer = profiles.find((x) => x.id === turn.pids[0]) ?? profile
   const voiceOn = micOn || turn.pids.some((pid) => phones.some((ph) => ph.pid === pid))
   const upNext = turn.next ? profiles.find((x) => x.id === turn.next) : undefined
@@ -366,7 +367,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
 
       <div className={`relative z-10 flex items-center gap-4 p-4 transition-opacity duration-500 sm:p-6 ${hideUi ? 'pointer-events-none opacity-0' : ''}`}>
         <button className="btn-icon shrink-0" onClick={leave} aria-label="Beenden"><Icon name="back" /></button>
-        {track.cover && <img src={track.cover} alt="" className="h-14 w-14 shrink-0 rounded-xl object-cover shadow-2xl sm:h-20 sm:w-20" />}
+        {track.cover && <img src={track.cover} alt="" className="h-14 w-14 shrink-0 rounded-2xl object-cover shadow-2xl shadow-black/60 ring-1 ring-white/10 sm:h-20 sm:w-20" />}
         <div className="min-w-0 flex-1">
           <p className="truncate text-xl font-black tracking-tight sm:text-3xl">{track.name}</p>
           <p className="truncate text-white/60 sm:text-lg">{track.artists}</p>
@@ -509,40 +510,59 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
           <div className="relative h-5 cursor-pointer" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); const t = tr.current; if (t) void t.seek(((e.clientX - r.left) / r.width) * t.duration()) }}>
             <div className="absolute inset-x-0 top-1.5 h-2 overflow-hidden rounded-full bg-white/15"><div ref={bar} className="grad h-full rounded-full" style={{ width: 0 }} /></div>
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-3">
-            <div className="flex items-center gap-2">
-              <button className="btn-icon" onClick={() => void tr.current?.seek(0)} aria-label="Von vorn"><Icon name="restart" /></button>
-              <button className="btn-primary h-16 w-16 p-0" onClick={toggle} aria-label={paused ? 'Wiedergabe' : 'Pause'}><Icon name={paused ? 'play' : 'pause'} size={32} /></button>
-              <span ref={clock} className="ml-1 w-24 font-mono text-sm tabular-nums text-white/60">0:00 / {fmtTime(track.durationMs / 1000)}</span>
+          <div className="mt-2 flex items-center gap-3">
+            <button className="btn-primary h-16 w-16 shrink-0 p-0" onClick={toggle} aria-label={paused ? 'Wiedergabe' : 'Pause'}><Icon name={paused ? 'play' : 'pause'} size={32} /></button>
+            <button className="btn-icon shrink-0 bg-transparent" onClick={() => void tr.current?.seek(0)} aria-label="Von vorn"><Icon name="restart" /></button>
+            <span ref={clock} className="font-mono text-sm tabular-nums text-white/60">0:00 / {fmtTime(track.durationMs / 1000)}</span>
+            <div className="ml-auto flex items-center gap-2">
+              {hasRef && <span className="hidden rounded-full bg-emerald-400/15 px-3 py-1.5 text-sm font-bold text-emerald-300 sm:inline">♪ Noten</span>}
+              <button className="btn" data-testid="mode" onClick={() => setShowMode(true)}><Icon name="users" size={20} /><span className="hidden sm:inline">Modus</span></button>
+              <button className="btn-icon" data-testid="settings" onClick={() => setShowSettings(true)} aria-label="Einstellungen" title="Lautstärke, Text-Versatz, Mikrofon, Noten"><Icon name="sliders" /></button>
+              <button className="btn-icon" onClick={fullscreen} aria-label="Vollbild"><Icon name="full" /></button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showSettings && (
+        <Modal onClose={() => setShowSettings(false)}>
+          <div className="flex items-start gap-4">
+            <h2 className="flex-1 text-3xl font-black tracking-tight">Einstellungen</h2>
+            <button className="btn-icon" onClick={() => setShowSettings(false)} aria-label="Schließen"><Icon name="close" /></button>
+          </div>
+          <div className="mt-5 divide-y divide-white/10">
             {tr.current?.kind === 'browser' && (
-              <label className="flex min-w-36 flex-1 flex-col sm:max-w-52">
-                <span className="label">Lautstärke</span>
-                <input type="range" min={0} max={1} step={0.02} value={settings.volume} aria-label="Lautstärke" onChange={(e) => { const v = +e.target.value; setSettings({ volume: v }); tr.current?.setVolume(v) }} />
+              <label className="flex items-center gap-4 py-4">
+                <span className="w-32 shrink-0 font-bold">Lautstärke</span>
+                <input className="flex-1" type="range" min={0} max={1} step={0.02} value={settings.volume} aria-label="Lautstärke" onChange={(e) => { const v = +e.target.value; setSettings({ volume: v }); tr.current?.setVolume(v) }} />
               </label>
             )}
-            <div>
-              <span className="label">Text-Versatz</span>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 py-4">
+              <span className="w-32 shrink-0 font-bold">Text-Versatz</span>
               <div className="flex items-center rounded-full bg-white/10">
                 <button className="h-11 cursor-pointer rounded-full px-4 font-bold hover:bg-white/15" onClick={() => shift(-0.25)} aria-label="Text früher">früher</button>
                 <span className="w-16 text-center font-bold tabular-nums">{offset > 0 ? '+' : ''}{offset.toFixed(2).replace('.', ',')} s</span>
                 <button className="h-11 cursor-pointer rounded-full px-4 font-bold hover:bg-white/15" onClick={() => shift(0.25)} aria-label="Text später">später</button>
               </div>
+              <span className="basis-full text-sm text-white/50">Kommen Text und Noten zu früh oder zu spät? Hier verschieben – wird je Song gemerkt.{!hasRef && lines.length > 0 && diff >= 2 ? ' Hinweis: Die gefundene Textfassung ist anders lang als die Spotify-Aufnahme.' : ''}</span>
             </div>
-            <div className="ml-auto flex flex-wrap items-center gap-2">
-              {!hasRef && lines.length > 0 && diff >= 2 && <span className="hidden rounded-full bg-yellow-300/15 px-3 py-1.5 text-sm font-semibold text-yellow-200 xl:inline" title="Die gefundene Textfassung ist anders lang als die Spotify-Aufnahme">Text evtl. andere Fassung</span>}
-              <span className="hidden rounded-full bg-emerald-400/15 px-3 py-1.5 text-sm font-semibold text-emerald-300 xl:inline">Spotify · {device}</span>
-              <button className="btn" data-testid="mode" onClick={() => setShowMode(true)}><Icon name="users" size={20} /><span className="hidden md:inline">Modus</span></button>
-              <button className="btn" onClick={() => setShowMelody(true)}><Icon name="music" size={20} /><span className="hidden md:inline">{hasRef ? 'Melodie ✓' : 'Melodie laden'}</span></button>
-              <button className={`btn ${micOn ? '' : 'text-white/50'}`} onClick={() => setShowMic(true)}>
-                <Icon name={!micOn ? 'micOff' : settings.micMode === 'speaker' ? 'speaker' : 'headphones'} size={20} />
-                <span className="hidden md:inline">{voiceOn && !micOn ? 'Handy-Mikrofon' : !micOn ? 'Mikrofon aus' : settings.micMode === 'speaker' ? 'Lautsprecher' : 'Kopfhörer'}</span>
-              </button>
-              {tr.current?.kind === 'browser' && <button className="btn-icon hidden lg:inline-flex" onClick={() => void start('remote')} title="Auf einem anderen Spotify-Gerät abspielen" aria-label="Anderes Gerät"><Icon name="speaker" /></button>}
-              <button className="btn-icon" onClick={fullscreen} aria-label="Vollbild"><Icon name="full" /></button>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 py-4">
+              <span className="w-32 shrink-0 font-bold">Noten</span>
+              <span className="flex-1 text-white/70">{hasRef ? `Geladen (${us?.notes} Noten)` : notes === 'search' ? 'Werden gesucht …' : 'Für diesen Song keine gefunden'}</span>
+              <button className="btn" onClick={() => { setShowSettings(false); setShowMelody(true) }}>{hasRef ? 'Ändern' : 'Eigene Datei laden'}</button>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 py-4">
+              <span className="w-32 shrink-0 font-bold">Mikrofon</span>
+              <span className="flex-1 text-white/70">{voiceOn && !micOn ? 'Handy-Mikrofon' : !micOn ? 'Aus' : settings.micMode === 'speaker' ? 'Dieses Gerät · Lautsprecher' : 'Dieses Gerät · Kopfhörer'}</span>
+              <button className="btn" onClick={() => { setShowSettings(false); setShowMic(true) }}>Ändern</button>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 py-4">
+              <span className="w-32 shrink-0 font-bold">Wiedergabe</span>
+              <span className="flex-1 text-white/70">Spotify · {device}</span>
+              {tr.current?.kind === 'browser' && <button className="btn" onClick={() => { setShowSettings(false); void start('remote') }}>Anderes Gerät</button>}
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {bleed && phase === 'ready' && (

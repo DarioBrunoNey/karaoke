@@ -14,7 +14,10 @@ const PREFIX = 'encore-karaoke-mic-'
 const newCode = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => 'abcdefghjkmnpqrstuvwxyz23456789'[b % 31]).join('')
 
 export async function openHost(h: HostHandlers): Promise<HostLink> {
-  const code = newCode()
+  // Der Code bleibt auf diesem Gerät gleich: Ein Handy, das die Mikrofon-Seite noch offen oder im Verlauf hat,
+  // findet die App auch nach einem Neuladen wieder – ohne den QR-Code erneut zu scannen.
+  let code = localStorage.getItem('encore-host-code') || ''
+  if (!/^[a-z0-9]{6}$/.test(code)) { code = newCode(); localStorage.setItem('encore-host-code', code) }
   if (useBc()) {
     const ch = new BroadcastChannel(PREFIX + code)
     ch.onmessage = (e) => {
@@ -27,13 +30,22 @@ export async function openHost(h: HostHandlers): Promise<HostLink> {
     return { code, send: (cid, msg) => ch.postMessage({ ...msg, to: cid }), close: () => ch.close() }
   }
   const { Peer } = await import('peerjs')
-  const peer = new Peer(PREFIX + code)
   const conns = new Map<string, { open: boolean; send(d: unknown): void }>()
-  await new Promise<void>((resolve, reject) => {
-    peer.on('open', () => resolve())
-    peer.on('error', (e) => reject(new Error('Vermittlungsdienst nicht erreichbar (' + e.type + ')')))
-    setTimeout(() => reject(new Error('Vermittlungsdienst antwortet nicht')), 12000)
-  })
+  // Nach einem Neuladen ist der alte Code beim Vermittlungsdienst manchmal noch kurz belegt – dann kurz warten
+  let peer!: InstanceType<typeof Peer>
+  for (let attempt = 0; ; attempt++) {
+    peer = new Peer(PREFIX + code)
+    const err = await new Promise<string>((resolve) => {
+      peer.on('open', () => resolve(''))
+      peer.on('error', (e) => resolve(e.type))
+      setTimeout(() => resolve('timeout'), 12000)
+    })
+    if (!err) break
+    peer.destroy()
+    if (err === 'unavailable-id' && attempt < 5) { await new Promise((r) => setTimeout(r, 2000)); continue }
+    if (err === 'unavailable-id') { code = newCode(); localStorage.setItem('encore-host-code', code); continue }
+    throw new Error(err === 'timeout' ? 'Vermittlungsdienst antwortet nicht' : 'Vermittlungsdienst nicht erreichbar (' + err + ')')
+  }
   peer.on('connection', (conn) => {
     conn.on('open', () => { conns.set(conn.connectionId, conn); h.onOpen(conn.connectionId, { name: String((conn.metadata as Hello | undefined)?.name ?? 'Gast') }) })
     conn.on('data', (d) => { const m = d as PitchMsg; if (m?.k === 'p') h.onData(conn.connectionId, m) })
