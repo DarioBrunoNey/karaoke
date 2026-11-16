@@ -99,6 +99,8 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   const [liveAll, setLiveAll] = useState<Record<string, Live>>({})
   const sessions = useRef(new Map<string, ScoreSession>())
   const [showMode, setShowMode] = useState(false)
+  const [tries, setTries] = useState(0)
+  const startRun = useRef(0)
   const [showSettings, setShowSettings] = useState(false)
   /** Hinweis: das Mikrofon hört die Musik mit */
   const [bleed, setBleed] = useState(false)
@@ -136,14 +138,17 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   const start = useCallback(async (mode: 'browser' | 'remote') => {
     setPhase('loading'); setError('')
     tr.current?.destroy(); tr.current = null
+    const run = ++startRun.current
     try {
-      // ein zweiter Anlauf fängt kurze Aussetzer bei Spotify ab, bevor eine Fehlermeldung erscheint
-      const open = () => (mode === 'browser' ? browserTransport(track, settings.volume) : remoteTransport(track))
-      const t = await open().catch((e) => ((e as { status?: number }).status === 403 ? Promise.reject(e) : new Promise((r) => setTimeout(r, 1200)).then(open)))
+      setTries(0)
+      const t = mode === 'browser' ? await browserTransport(track, settings.volume, (n) => { if (run === startRun.current) setTries(n) }) : await remoteTransport(track)
+      // inzwischen wurde ein anderer Weg gewählt (z. B. „anderes Gerät") – diesen Start verwerfen
+      if (run !== startRun.current) { t.destroy(); return }
       tr.current = t
       setDevice(t.deviceName)
       setPhase('ready')
     } catch (e) {
+      if (run !== startRun.current) return
       setError((e as Error).message || 'Wiedergabe nicht möglich')
       setPhase('error')
     }
@@ -440,7 +445,22 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
           <span className="grad-text text-[clamp(3rem,9vw,8rem)] font-black leading-none tabular-nums">3</span>
           <div className="mt-2 h-1.5 w-40 overflow-hidden rounded-full bg-white/15"><div className="grad h-full rounded-full" /></div>
         </div>
-        {phase === 'loading' && <div><div className="grad mx-auto h-20 w-20 rounded-full [animation:pulse-ring_1.4s_infinite]" /><p className="mt-8 text-2xl font-bold">Spotify wird gestartet …</p></div>}
+        {phase === 'loading' && (
+          <div>
+            <div className="grad mx-auto h-20 w-20 rounded-full [animation:pulse-ring_1.4s_infinite]" />
+            <p className="mt-8 text-2xl font-bold">Spotify wird gestartet …</p>
+            {/* dauert es länger, zeigt die App, dass sie dran ist – und bietet Auswege an */}
+            {tries > 2 && (
+              <div className="rise mt-5">
+                <p className="text-white/55">Spotify braucht gerade etwas länger ({tries}. Versuch).</p>
+                <div className="mt-4 flex flex-wrap justify-center gap-3">
+                  <button className="btn" onClick={() => void start('remote')}>Auf anderem Spotify-Gerät abspielen</button>
+                  <button className="btn" onClick={leave}>Abbrechen</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         {phase === 'error' && (
           <div className="glass max-w-xl p-8">
             <p className="text-2xl font-bold">Wiedergabe in diesem Browser nicht möglich</p>
