@@ -239,3 +239,20 @@ import { parseUltraStar, syllableProgress } from '../src/lib/ultrastar.ts'
   }
   console.log('Versatz bei gehaltenen Tönen OK')
 }
+{
+  // Kopierte Zeitfassungen: dieselben Zeiten hängen an Aufnahmen mit 226 … 470 s; echt ist nur die ~355-s-Fassung
+  const { usableLyrics } = await import('../src/spotify/api.ts')
+  const lines = Array.from({ length: 44 }, (_, k) => ({ t: 11.8 + k * 7, text: 'Zeile ' + k }))   // letzte Zeile bei ~313 s
+  const entries = [226, 253, 307, 308, 353, 353, 354, 355, 356, 356, 470].map((duration, id) => ({ id, duration, lines }))
+  const short = usableLyrics(entries, 253)
+  assert.equal(short.ok.length, 0, 'kurze Fassung: kein passender Text'); assert.ok(Math.abs(short.otherVersion - 354) <= 3)
+  const right = usableLyrics(entries, 355)
+  assert.equal(right.ok.length, 6); assert.equal(right.otherVersion, 0)
+  const live = usableLyrics(entries, 470)
+  assert.equal(live.ok.filter((e) => Math.abs(e.duration - 470) <= 4).length, 0, 'Live-Fassung: fremde Zeiten werden nicht übernommen')
+  assert.ok(Math.abs(live.otherVersion - 354) <= 3)
+  // normale Songs bleiben unberührt: verschiedene Einsendungen, gleiche Länge
+  const normal = [0, 0.2, -0.1].map((o, id) => ({ id, duration: 265, lines: lines.slice(0, 30).map((l) => ({ ...l, t: l.t + o })) }))
+  assert.equal(usableLyrics(normal, 265).ok.length, 3)
+  console.log('Kopierte Textfassungen OK')
+}

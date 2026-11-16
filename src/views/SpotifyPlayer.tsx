@@ -45,6 +45,8 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   const [lrc, setLrc] = useState<LyricLine[]>([])
   const [plain, setPlain] = useState('')
   const [diff, setDiff] = useState(0)
+  /** Länge (s) einer anderen Aufnahme, für die es synchronen Text gäbe */
+  const [otherVersion, setOtherVersion] = useState(0)
   const [lyricsLoaded, setLyricsLoaded] = useState(false)
   const [us, setUs] = useState<UsSong | null>(() => {
     try { const raw = localStorage.getItem(usKey(track.id)); return raw && raw !== '-' ? parseUltraStar(raw) : null } catch { return null }
@@ -181,7 +183,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
     let gone = false
     lyricsFor(track)
       .then(async (l) => {
-        setLrc(l.lines); setPlain(l.plain); setDiff(l.diff); setLyricsLoaded(true)
+        setLrc(l.lines); setPlain(l.plain); setDiff(l.diff); setOtherVersion(l.otherVersion ?? 0); setLyricsLoaded(true)
         if (localStorage.getItem(usKey(track.id))) return // schon geladen – oder vom Nutzer bewusst entfernt
         const m = await findMelody(track, l.lines).catch(() => null)
         if (gone) return
@@ -576,7 +578,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
           </div>
         ) : !lyricsLoaded ? <p className="text-2xl font-bold text-white/60">Liedtext wird gesucht …</p> : plain ? (
           <div className="scroll-thin max-h-full w-full max-w-4xl overflow-y-auto whitespace-pre-line py-6 text-[clamp(1.1rem,2.4vw,2.2rem)] font-semibold leading-relaxed text-white/85">
-            <p className="mb-4 text-base font-normal text-white/45">Für diesen Titel gibt es nur unsynchronisierten Text.</p>{plain}
+            <p className="mb-4 rounded-2xl bg-white/10 p-3 text-base font-normal text-white/70">{otherVersion ? `Für diese Aufnahme gibt es keinen passend getakteten Text – nur für eine andere Fassung des Songs (Länge ${fmtTime(otherVersion)}). Such bei Spotify die Fassung mit dieser Länge, dann läuft der Text mit.` : 'Für diesen Titel gibt es nur Text ohne Zeitangaben.'}</p>{plain}
           </div>
         ) : <div className="text-white/60"><p className="text-3xl font-bold text-white">Kein Liedtext gefunden</p><p className="mt-2 text-lg">Über „Melodie laden“ lässt sich eine Karaoke-Datei mit Text und Melodie ergänzen.</p></div>)}
       </div>

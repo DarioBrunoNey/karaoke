@@ -157,9 +157,45 @@ export function consensus(cands: { lines: LyricLine[]; exact?: boolean }[]): { l
   return { lines, support: support[best] }
 }
 
+export interface LyricEntry { id: number; duration: number; lines: LyricLine[] }
+
+/**
+ * Sortiert Einträge aus, deren Zeiten gar nicht zu dieser Aufnahme gehören können. In der Textdatenbank wird
+ * dieselbe Zeitfassung oft an viele Aufnahmen eines Songs gehängt (Single, Album, Live …), obwohl sie nur zu
+ * einer passt. Erkennbar daran, dass exakt gleiche Zeiten bei deutlich verschieden langen Aufnahmen stehen –
+ * gültig sind sie dann nur für die Längengruppe, bei der sie am häufigsten eingetragen sind.
+ * Liefert die brauchbaren Einträge und, falls nur eine andere Fassung Text hat, deren Länge.
+ */
+export function usableLyrics(entries: LyricEntry[], dur: number): { ok: LyricEntry[]; otherVersion: number } {
+  const sigOf = (e: LyricEntry) => `${e.lines.length}|${e.lines[0]?.t.toFixed(1)}|${e.lines[e.lines.length - 1]?.t.toFixed(1)}`
+  const groups = new Map<string, LyricEntry[]>()
+  for (const e of entries) { if (!e.lines.length) continue; const k = sigOf(e); groups.set(k, [...(groups.get(k) ?? []), e]) }
+  const ok: LyricEntry[] = []
+  let otherVersion = 0
+  for (const g of groups.values()) {
+    const last = g[0].lines[g[0].lines.length - 1].t
+    const durs = g.map((e) => e.duration)
+    let home = (d: number) => true
+    if (Math.max(...durs) - Math.min(...durs) > 4) {
+      // Längengruppe mit den meisten Einträgen, in die der Text auch hineinpasst; bei Gleichstand die kürzeste
+      const fits = durs.filter((d) => d >= last + 2)
+      const cand = (fits.length ? fits : durs).map((d) => ({ d, n: durs.filter((x) => Math.abs(x - d) <= 3).length }))
+      cand.sort((x, y) => y.n - x.n || x.d - y.d)
+      const best = cand[0].d
+      home = (d) => Math.abs(d - best) <= 3
+      if (Math.abs(best - dur) > 3) otherVersion = otherVersion || best
+    }
+    for (const e of g) {
+      // der Text muss vor dem Ende dieser Aufnahme enden – sonst gehört er sicher zu einer anderen Fassung
+      if (home(e.duration) && last <= dur - 1) ok.push(e)
+    }
+  }
+  return { ok, otherVersion: ok.some((e) => Math.abs(e.duration - dur) <= 4) ? 0 : otherVersion }
+}
+
 /** Synchronen Liedtext aus LRCLIB holen; unter den Fassungen passender Länge entscheidet die Mehrheit. */
-export async function lyricsFor(t: SpTrack): Promise<{ lines: LyricLine[]; plain: string; diff: number }> {
-  const key = 'encore-lyr5-' + t.id
+export async function lyricsFor(t: SpTrack): Promise<{ lines: LyricLine[]; plain: string; diff: number; otherVersion?: number }> {
+  const key = 'encore-lyr6-' + t.id
   try { const c = JSON.parse(localStorage.getItem(key) || 'null'); if (c) return c } catch { /* neu laden */ }
   const artist = t.artists.split(',')[0]
   const title = t.name.replace(/\s+-\s+.*(remaster|version|edit|mix|live).*$/i, '').replace(/\s*\((feat|with|remaster)[^)]*\)/gi, '')
@@ -175,12 +211,13 @@ export async function lyricsFor(t: SpTrack): Promise<{ lines: LyricLine[]; plain
   for (const h of [exact, ...(Array.isArray(s1) ? s1 : []), ...(Array.isArray(s2) ? s2 : [])]) {
     if (h?.id && !seen.has(h.id)) { seen.add(h.id); hits.push(h) }
   }
-  const synced = hits.filter((h) => h.syncedLyrics)
-  let pool = synced.filter((h) => Math.abs((h.duration || 0) - dur) <= 2)
-  if (!pool.length) pool = synced.filter((h) => Math.abs((h.duration || 0) - dur) <= 4)
-  const pickd = consensus(pool.map((h) => ({ lines: parseLrc(h.syncedLyrics).filter((l) => l.text), exact: h.id === exact?.id })))
-  const diff = pool.length ? Math.min(...pool.map((h) => Math.abs((h.duration || 0) - dur))) : 99
-  const out = { lines: pickd?.lines ?? [], plain: (hits.find((h) => h.plainLyrics)?.plainLyrics as string) || '', diff: Math.round(diff * 10) / 10 }
+  const all: LyricEntry[] = hits.filter((h) => h.syncedLyrics).map((h) => ({ id: h.id, duration: h.duration || 0, lines: parseLrc(h.syncedLyrics).filter((l) => l.text) }))
+  const { ok, otherVersion } = usableLyrics(all, dur)
+  let pool = ok.filter((e) => Math.abs(e.duration - dur) <= 2)
+  if (!pool.length) pool = ok.filter((e) => Math.abs(e.duration - dur) <= 4)
+  const pickd = consensus(pool.map((e) => ({ lines: e.lines, exact: e.id === exact?.id })))
+  const diff = pool.length ? Math.min(...pool.map((e) => Math.abs(e.duration - dur))) : 99
+  const out = { lines: pickd?.lines ?? [], plain: (hits.find((h) => h.plainLyrics)?.plainLyrics as string) || '', diff: Math.round(diff * 10) / 10, otherVersion: pickd ? 0 : otherVersion }
   if (hits.length) { try { localStorage.setItem(key, JSON.stringify(out)) } catch { /* Speicher voll – egal */ } }
   return out
 }
