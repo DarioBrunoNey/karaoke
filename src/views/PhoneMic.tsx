@@ -3,6 +3,7 @@ import { Mic } from '../audio/mic'
 import { midiToName } from '../lib/pitch'
 import { joinHost, type ClientLink } from '../remote/link'
 import { Icon, Stars } from '../ui'
+import QrScanner from './QrScanner'
 import type { HostMsg } from '../remote/link'
 
 type State = 'idle' | 'starting' | 'on' | 'lost' | 'error'
@@ -20,6 +21,7 @@ export default function PhoneMic({ code }: { code: string }) {
   const link = useRef<ClientLink | null>(null)
   const micRef = useRef<Mic | null>(null)
   const alive = useRef(true)
+  const [scan, setScan] = useState(false)
 
   useEffect(() => () => { alive.current = false; link.current?.close(); micRef.current?.stop() }, [])
 
@@ -100,6 +102,8 @@ export default function PhoneMic({ code }: { code: string }) {
             <button data-testid="phone-start" className="btn-primary mt-4 w-full py-5 text-xl" disabled={state === 'starting' || !name.trim()}>{state === 'starting' ? 'Verbinde …' : 'Mitsingen'}</button>
           </form>
           {error && <p className="mt-4 rounded-2xl bg-red-500/15 p-3 text-red-200">{error}</p>}
+          <button data-testid="rescan" className="mt-4 flex cursor-pointer items-center justify-center gap-2 text-sm font-semibold text-white/55 underline" onClick={() => setScan(true)}><Icon name="search" size={16} />QR-Code neu scannen</button>
+          {scan && <QrScanner onClose={() => setScan(false)} />}
           <p className="mt-6 text-sm leading-relaxed text-white/45">Gleich fragt dein Handy nach dem Mikrofon – bitte erlauben. Dein Gesang wird nur auf diesem Handy ausgewertet, nicht aufgenommen und nicht übertragen.</p>
         </div>
       ) : (
@@ -121,6 +125,8 @@ export default function PhoneMic({ code }: { code: string }) {
               <p className="mt-1 text-sm font-semibold uppercase tracking-[.25em] text-white/50">Punkte{score.label ? ` · ${score.label}` : ''}</p>
             </div>
           )}
+          {state === 'lost' && <button className="btn" onClick={() => setScan(true)}><Icon name="search" size={18} />QR-Code neu scannen</button>}
+          {state === 'lost' && scan && <QrScanner onClose={() => setScan(false)} />}
           <ul className="space-y-1.5 text-left text-sm text-white/50">
             <li>🎤 Handy wie ein Mikrofon nah an den Mund</li>
             <li>📱 Diese Seite offen und den Bildschirm an lassen</li>

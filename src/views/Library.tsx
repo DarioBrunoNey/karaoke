@@ -3,12 +3,14 @@ import { useStore } from '../store'
 import { Cover, Icon, fmtTime } from '../ui'
 import type { Song } from '../lib/types'
 import SpotifySearch from './SpotifySearch'
+import QrScanner from './QrScanner'
 
 type Tab = 'all' | 'fav' | 'recent' | 'spotify'
 
 export default function Library() {
   const { songs, importFiles, play, enqueue, updateSong, setEdit, scores, queue, playNext, go, libraryTab: tab, setLibraryTab: setTab } = useStore()
   const [q, setQ] = useState('')
+  const [scan, setScan] = useState(false)
   const file = useRef<HTMLInputElement>(null)
 
   const list = useMemo(() => {
@@ -27,6 +29,7 @@ export default function Library() {
 
   return (
     <div className="pb-10">
+      {scan && <QrScanner onClose={() => setScan(false)} />}
       <section className={`glass relative mt-2 overflow-hidden p-7 sm:p-10 ${tab === 'spotify' ? 'hidden' : ''}`}>
         <div className="grad absolute -right-24 -top-24 h-72 w-72 rounded-full opacity-40 blur-3xl" />
         <p className="text-sm font-semibold uppercase tracking-[.25em] text-white/50">Deine Bühne</p>
@@ -35,6 +38,7 @@ export default function Library() {
         <div className="mt-6 flex flex-wrap gap-3">
           <button className="btn-primary px-7 py-4 text-lg" onClick={() => file.current?.click()}><Icon name="plus" />Songs hinzufügen</button>
           <button className="btn px-7 py-4 text-lg" onClick={() => go({ name: 'party' })}><Icon name="users" />Karaoke-Abend starten</button>
+          <button data-testid="scan-open" className="btn px-7 py-4 text-lg lg:hidden" onClick={() => setScan(true)}><Icon name="mic" />Als Mikrofon beitreten</button>
           {queue.length > 0 && <button className="btn px-7 py-4 text-lg" onClick={() => playNext()}><Icon name="play" />Warteschlange starten ({queue.length})</button>}
         </div>
         <input ref={file} type="file" accept="audio/*,.mp3,.wav,.m4a,.flac,.ogg,.opus,.aac" multiple hidden
