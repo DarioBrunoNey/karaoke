@@ -60,7 +60,8 @@ export function phoneSample(pid: string, quiet = false): MicSample | null {
   const l = live.get(pid)
   if (!l || performance.now() - l.at > 300) return { midi: 0, level: 0, voiced: false }
   let g = gates.get(pid)
-  if (!g) { g = new BleedGate(2.3); gates.set(pid, g) }
+  // Obergrenze 0,035: Fernseher-Ton kommt am Handy leise an; mehr wäre ein Mensch, keine Musik
+  if (!g) { g = new BleedGate(2.3, 0.035); gates.set(pid, g) }
   if (l.used !== l.at) { l.used = l.at; g.feed(l.rms, quiet) } // jeden Messwert nur einmal zählen
   const voiced = l.midi > 0 && g.passes(l.rms)
   return { midi: voiced ? l.midi : 0, level: l.level, voiced }

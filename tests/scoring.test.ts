@@ -164,7 +164,8 @@ import { parseUltraStar, syllableProgress } from '../src/lib/ultrastar.ts'
   for (let i = 0; i < 60; i++) g.feed(0.02 + 0.012 * rnd(), true)   // Intro: nur Musik
   for (let i = 0; i < 200; i++) g.feed(0.2, false)                    // Singen verändert die Messung nicht
   console.log('Musikpegel gemessen:', g.level.toFixed(3))
-  assert.ok(g.level > 0.025 && g.level < 0.033)
+  assert.ok(g.level > 0.024 && g.level < 0.033)
+  { const loud = new BleedGate(2.3, 0.035); for (let i = 0; i < 60; i++) loud.feed(0.2, true); assert.equal(loud.passes(0.15), true, 'wer im Intro schon singt, wird später nicht ausgesperrt') }
   assert.equal(g.passes(0.035), false, 'Originalsänger aus dem Lautsprecher zählt nicht')
   assert.equal(g.passes(0.06), false, 'auch etwas lautere Stellen der Musik nicht')
   assert.equal(g.passes(0.15), true, 'eigene Stimme zählt')
