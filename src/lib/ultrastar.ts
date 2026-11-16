@@ -18,6 +18,10 @@ export function parseUltraStar(src: string): UsSong {
   const gap = parseFloat((head.GAP || '0').replace(',', '.')) / 1000
   const beat = 60 / (bpm * 4)
   const relative = /^yes$/i.test(head.RELATIVE || '')
+  // #ENCOREWARP:t1:d1;t2:d2 … – ab Zeitpunkt t_k (Sekunden) alles um d_k verschieben. Damit passen Noten auch
+  // dann, wenn die Spotify-Aufnahme z. B. ein längeres Solo hat als die Fassung, für die die Datei erstellt wurde.
+  const warp = (head.ENCOREWARP || '').split(';').map((x) => x.split(':').map(Number)).filter((x) => x.length === 2 && x.every(Number.isFinite))
+  const shiftAt = (t: number) => { let d = 0; for (const [from, by] of warp) if (t >= from) d = by; return d }
   const lines: UsLine[] = []
   const noteList: { t: number; e: number; midi: number }[] = []
   let cur: UsLine | null = null
@@ -27,7 +31,8 @@ export function parseUltraStar(src: string): UsSong {
     if (r.startsWith('E')) break
     const m = r.match(/^([:*FRG])\s*(-?\d+)\s+(\d+)\s+(-?\d+)(?: (.*))?$/)
     if (m) {
-      const t = gap + (base + +m[2]) * beat
+      const t0 = gap + (base + +m[2]) * beat
+      const t = t0 + shiftAt(t0)
       const e = t + Math.max(1, +m[3]) * beat
       const raw = (m[5] ?? '').replace(/~/g, '')
       if (!cur) { cur = { t, text: '', syl: [] }; lines.push(cur) }

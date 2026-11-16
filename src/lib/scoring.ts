@@ -84,6 +84,46 @@ export class ScoreSession {
     return 0
   }
 
+  /**
+   * Schätzt, um wie viele Frames die Stimme insgesamt versetzt ankommt (Funkstrecke, drahtlose Bildübertragung,
+   * Bluetooth): der Versatz, bei dem die meisten gesungenen Töne auf die Noten passen. 0 = kein klarer Befund.
+   * Positiv = Stimme kommt zu spät an.
+   */
+  estimateLag(maxLate = 60, maxEarly = 10): number {
+    const { ref, user } = this
+    const n = ref.length, hit = this.tol.hit
+    let best = 0, bestCount = 0, zero = 0
+    const counts: number[] = []
+    for (let lag = -maxEarly; lag <= maxLate; lag++) {
+      let c = 0
+      for (let i = Math.max(0, -lag); i < n - Math.max(0, lag); i += 2) {
+        if (ref[i] <= 0) continue
+        const u = user[i + lag]
+        if (u > 0 && Math.abs(foldSemis(u - ref[i])) <= hit) c++
+      }
+      counts.push(c)
+      if (lag === 0) zero = c
+      if (c > bestCount) { bestCount = c; best = lag }
+    }
+    // nur bei klarem Befund: genug Treffer, und deutlich mehr als ohne Verschiebung
+    if (bestCount < 100 || bestCount < zero * 1.12 + 10 || Math.abs(best) < 2) return 0
+    // Schwerpunkt um das Maximum – glättet das Ergebnis
+    let sw = 0, sx = 0
+    for (let lag = best - 3; lag <= best + 3; lag++) {
+      const c = counts[lag + maxEarly]
+      if (c !== undefined && c > bestCount * 0.9) { sw += c; sx += c * lag }
+    }
+    return Math.round(sx / sw)
+  }
+
+  /** Verschiebt alles bisher Aufgenommene um n Frames nach vorn (positiv = früher) – nach erkanntem Versatz */
+  shift(frames: number) {
+    const u = this.user, n = u.length
+    if (frames > 0) { u.copyWithin(0, frames); u.fill(-1, n - frames) }
+    else if (frames < 0) { u.copyWithin(-frames, 0, n + frames); u.fill(-1, 0, -frames) }
+    this.lastIdx -= frames
+  }
+
   /** Trefferquote (0…1) für einen Zeitabschnitt, z. B. eine Textzeile; null, wenn dort nichts zu singen war */
   hitRatio(from: number, to: number): number | null {
     const { ref, user, fps } = this

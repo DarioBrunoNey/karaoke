@@ -27,7 +27,7 @@ const LEAD = 3 // Sekunden Vorlauf vor einem Abschnitt
 /** Ein Abschnitt, den ein bestimmter Sänger singt */
 interface Round { pids: string[]; s: number; e: number; label: string }
 type Live = { score: number; state: LiveState; note: string; level: number }
-const usKey = (id: string) => 'encore-us3-' + id
+const usKey = (id: string) => 'encore-us4-' + id
 
 /**
  * Spotify-Modus: Spotify spielt die Originalaufnahme, die App zeigt den Text synchron und bewertet die Stimme.
@@ -89,6 +89,13 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   const canvases = useRef<(HTMLCanvasElement | null)[]>([])
   const centers = useRef<{ current: number }[]>([])
   const lives = useRef(new Map<string, { state: LiveState; midi: number; level: number }>())
+  /**
+   * Selbst erkannter Zeitversatz der Stimme in Sekunden, getrennt für Handy-Mikrofon und eingebautes Mikrofon.
+   * Startwert ist der zuletzt gelernte – der Aufbau (Fernseher, Funk) ändert sich von Song zu Song selten.
+   */
+  const autoLag = useRef({ phone: +(localStorage.getItem('encore-lag-phone') || 0), local: +(localStorage.getItem('encore-lag-local') || 0) })
+  const lagCheck = useRef(0)
+  const [lagShown, setLagShown] = useState(0)
   const [liveAll, setLiveAll] = useState<Record<string, Live>>({})
   const sessions = useRef(new Map<string, ScoreSession>())
   const [showMode, setShowMode] = useState(false)
@@ -244,7 +251,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
         const sess = sessFor(pid)
         if (smp && !t.paused() && active) {
           // Handy: Funkstrecke braucht etwas länger als das eingebaute Mikrofon
-          const st = sess.add(lt - p.current.micOffset - (viaPhone ? 0.08 : 0), smp.voiced ? smp.midi : 0)
+          const st = sess.add(lt - p.current.micOffset - (viaPhone ? 0.08 + autoLag.current.phone : autoLag.current.local), smp.voiced ? smp.midi : 0)
           lives.current.set(pid, { state: st, midi: smp.voiced ? smp.midi : 0, level: smp.level })
         }
         const c = (centers.current[k] ??= { current: center.current })
@@ -272,6 +279,21 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
           const r = pl[ri.current], nx = pl[ri.current + 1]
           const soon = nx && nx.pids[0] !== r.pids[0] && lt > r.e - 3 ? nx.pids[0] : ''
           setTurn((cur) => (cur.next === soon ? cur : { ...cur, next: soon }))
+        }
+        // Alle 5 s prüfen, ob die Stimme insgesamt versetzt ankommt (z. B. Ton über Funk am Fernseher) – und ausgleichen
+        if (hasRef && now - lagCheck.current > 5000 && pos > 25) {
+          lagCheck.current = now
+          for (const pid of singers) {
+            const ss = sessFor(pid), kind = hasPhone(pid) ? 'phone' : 'local'
+            const lag = ss.estimateLag()
+            if (lag) {
+              for (const other of singers) if ((hasPhone(other) ? 'phone' : 'local') === kind) sessFor(other).shift(lag)
+              autoLag.current[kind] = Math.max(-0.2, Math.min(1.5, autoLag.current[kind] + lag / FPS))
+              localStorage.setItem('encore-lag-' + kind, autoLag.current[kind].toFixed(2))
+              setLagShown(autoLag.current[kind])
+              break
+            }
+          }
         }
         const all: Record<string, Live> = {}
         for (const pid of singers) {
@@ -553,7 +575,8 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
             </div>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 py-4">
               <span className="w-32 shrink-0 font-bold">Mikrofon</span>
-              <span className="flex-1 text-white/70">{voiceOn && !micOn ? 'Handy-Mikrofon' : !micOn ? 'Aus' : settings.micMode === 'speaker' ? 'Dieses Gerät · Lautsprecher' : 'Dieses Gerät · Kopfhörer'}</span>
+              <span className="flex-1 text-white/70">{voiceOn && !micOn ? 'Handy-Mikrofon' : !micOn ? 'Aus' : settings.micMode === 'speaker' ? 'Dieses Gerät · Lautsprecher' : 'Dieses Gerät · Kopfhörer'}
+                {(lagShown || autoLag.current.phone || autoLag.current.local) ? <span className="block text-sm text-white/45">Verzögerung selbst erkannt: {((lagShown || (voiceOn && !micOn ? autoLag.current.phone : autoLag.current.local)) * 1000).toFixed(0)} ms</span> : null}</span>
               <button className="btn" onClick={() => { setShowSettings(false); setShowMic(true) }}>Ändern</button>
             </div>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 py-4">

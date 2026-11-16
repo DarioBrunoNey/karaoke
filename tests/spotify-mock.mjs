@@ -16,7 +16,7 @@ async function run(mode, shot) {
   await page.addInitScript(({ mode, US, NOTES }) => {
     localStorage.setItem('encore-settings', JSON.stringify({ spotifyClientId: 'x'.repeat(32), micAsked: true, micMode: 'headphones' }))
     localStorage.setItem('encore-spotify-token', JSON.stringify({ access: 'tok', refresh: 'ref', exp: Date.now() + 3.6e6, clientId: 'x'.repeat(32) }))
-    if (['melodie', 'falsch', 'duell', 'handys', 'mithoeren', 'lobby'].includes(mode)) localStorage.setItem('encore-us3-t1', US)
+    if (['melodie', 'falsch', 'duell', 'handys', 'mithoeren', 'lobby'].includes(mode)) localStorage.setItem('encore-us4-t1', US)
     navigator.mediaDevices.getUserMedia = async () => {
       const ac = new AudioContext()
       const osc = ac.createOscillator(); osc.type = 'sawtooth'

@@ -171,3 +171,33 @@ import { parseUltraStar, syllableProgress } from '../src/lib/ultrastar.ts'
   assert.equal(g.passes(0.15), true, 'eigene Stimme zählt')
   console.log('Musik-Ausblendung OK')
 }
+{
+  // Selbst erkannter Versatz: ein sauberer Sänger kommt 0,3 s zu spät an (z. B. Ton über Funk am Fernseher)
+  const mel = new Float32Array(fps * 60)
+  for (let i = fps * 4; i < mel.length; i++) if (i % 40 < 30) mel[i] = 60 + ((Math.floor(i / 40) * 5) % 9) // wechselnde Töne mit Pausen
+  const late = new ScoreSession({ fps, data: mel, source: 'stems' })
+  for (let i = 0; i < mel.length - 15; i++) late.add((i + 15) / fps, mel[i])
+  const before = late.result()
+  const lag = late.estimateLag()
+  late.shift(lag)
+  const after = late.result()
+  console.log('Versatz erkannt:', lag, 'Frames (=', lag / fps, 's) | Punkte vorher', before.total, '→ nachher', after.total)
+  assert.equal(lag, 15); assert.ok(before.total < 80 && after.total >= 95)
+  // pünktlicher Sänger: nichts verschieben
+  const onTime = new ScoreSession({ fps, data: mel, source: 'stems' })
+  for (let i = 0; i < mel.length; i++) onTime.add(i / fps, mel[i])
+  assert.equal(onTime.estimateLag(), 0)
+  // schiefer Sänger: kein „Versatz" herbeirechnen
+  const off = new ScoreSession({ fps, data: mel, source: 'stems' })
+  for (let i = 0; i < mel.length; i++) off.add(i / fps, mel[i] ? 55 + 9 * rnd() : 0)
+  assert.equal(off.estimateLag(), 0, 'schief bleibt schief')
+  console.log('Versatz-Erkennung OK')
+}
+{
+  // Abschnittsweise Verschiebung: ab 10 s alles 5 s später (längeres Zwischenspiel in der Spotify-Aufnahme)
+  const { parseUltraStar } = await import('../src/lib/ultrastar.ts')
+  const u = parseUltraStar('#ENCOREWARP:10.00:5.00\n#BPM:150\n#GAP:2000\n: 0 4 0 Eins\n- 10\n: 100 4 2 Zwei\nE\n')
+  assert.ok(Math.abs(u.lines[0].t - 2) < 1e-9 && Math.abs(u.lines[1].t - 17) < 1e-9, 'Zeiten ' + u.lines.map((l) => l.t))
+  assert.equal(u.melody[Math.round(17.1 * 50)], 62); assert.equal(u.melody[Math.round(12.1 * 50)], 0)
+  console.log('Sprungstellen OK')
+}

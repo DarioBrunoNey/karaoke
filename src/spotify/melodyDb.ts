@@ -94,6 +94,41 @@ export function alignFit(us: UsSong, lrc: LyricLine[]): Fit | null {
   return { a, b, inliers: lines, usable }
 }
 
+/**
+ * Findet Stellen, ab denen die Spotify-Aufnahme gegenüber der Notendatei versetzt weiterläuft (anderes Solo,
+ * zusätzlicher Refrain, gekürzte Fassung). Liefert Sprungstellen [ab Zeit, Versatz] auf der bereits
+ * angepassten Zeitachse. Ein Sprung gilt nur, wenn mehrere aufeinanderfolgende Zeilen ihn übereinstimmend zeigen.
+ */
+export function findJumps(us: UsSong, lrc: LyricLine[], fit: { a: number; b: number }): [number, number][] {
+  const L = lrc.map((l) => ({ t: l.t, n: norm(l.text) })).filter((l) => l.n.length >= 6)
+  // je Notenzeile: mögliche Abweichungen zum Liedtext (bei wiederholten Zeilen mehrere)
+  const rows = us.lines.map((u) => {
+    const un = norm(u.text), t = fit.a * u.t + fit.b
+    const res = un.length < 6 ? [] : L.filter((l) => l.n.startsWith(un.slice(0, 10)) || un.startsWith(l.n.slice(0, 10))).map((l) => l.t - t)
+    return { t, res }
+  })
+  const jumps: [number, number][] = []
+  let d = 0
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i]
+    if (!r.res.length || r.res.some((x) => Math.abs(x - d) <= 0.6)) continue
+    // diese Zeile passt nicht mehr – zeigen die nächsten Zeilen denselben neuen Versatz?
+    const next = rows.slice(i, i + 8).filter((x) => x.res.length).slice(0, 4)
+    if (next.length < 2) continue
+    let best = { v: 0, n: 0 }
+    for (const v of next.flatMap((x) => x.res)) {
+      const n = next.filter((x) => x.res.some((y) => Math.abs(y - v) <= 0.4)).length
+      if (n > best.n || (n === best.n && Math.abs(v - d) < Math.abs(best.v - d))) best = { v, n }
+    }
+    if (best.n >= Math.min(3, next.length) && best.n >= 2 && Math.abs(best.v - d) > 0.6) {
+      const hits = next.flatMap((x) => x.res.filter((y) => Math.abs(y - best.v) <= 0.4)).sort((x, y) => x - y)
+      d = hits[hits.length >> 1]
+      jumps.push([Math.max(0, r.t - 0.5), d])
+    }
+  }
+  return jumps
+}
+
 export interface FoundMelody { text: string; aligned: boolean }
 
 /** Schreibt Tempo und Startversatz so in die Datei, dass ihre Zeiten zur Spotify-Aufnahme passen */
@@ -118,7 +153,12 @@ export async function findMelody(track: SpTrack, lrc: LyricLine[]): Promise<Foun
   const text = await r.text()
   const us = parseUltraStar(text)
   const fit = alignFit(us, lrc)
-  if (fit) return { text: retime(text, fit), aligned: true }
+  if (fit) {
+    let out = retime(text, fit)
+    const jumps = findJumps(us, lrc, fit)
+    if (jumps.length) out = `#ENCOREWARP:${jumps.map(([t, d]) => `${t.toFixed(2)}:${d.toFixed(2)}`).join(';')}\n` + out.replace(/^#ENCOREWARP:.*\n/m, '')
+    return { text: out, aligned: true }
+  }
   // Ohne brauchbaren Liedtext: nur übernehmen, wenn die Fassung gleich lang ist wie die Spotify-Aufnahme
   const dur = parseFloat(text.match(/^#ALLKARAOKE_DURATION:(.*)$/m)?.[1] ?? '0')
   if (!lrc.length && dur && Math.abs(dur - track.durationMs / 1000) <= 2) return { text, aligned: false }
