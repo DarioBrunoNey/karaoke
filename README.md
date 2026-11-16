@@ -17,6 +17,12 @@ Mikrofonzugriff erlaubt der Browser nur über **https** oder **localhost**. Für
 also `dist/` auf einen https-Webspace legen (beliebiger statischer Hoster) und dort „Zum Startbildschirm
 hinzufügen" bzw. „App installieren" wählen.
 
+## Veröffentlichung
+
+- **GitHub Pages** (`deploy.yml`): bei jedem Push auf `main`.
+- **HostEurope** (`deploy-hosteurope.yml`): zusätzlich nach `https://dario-bruno.com/karaoke/`, sobald die vier FTP-Secrets
+  gesetzt sind. Lädt nur in einen Ordner, der auf `karaoke/` endet.
+
 ## Was funktioniert (Version 0.1)
 
 | Bereich | Stand |

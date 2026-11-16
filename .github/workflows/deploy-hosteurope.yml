@@ -1,0 +1,77 @@
+# Lädt die gebaute App per FTPS zu HostEurope hoch → https://dario-bruno.com/karaoke/
+# Zugangsdaten liegen NICHT im Code, sondern als GitHub-Secrets
+# (Repository → Settings → Secrets and variables → Actions → New repository secret):
+#   FTP_SERVER      z. B. wp1126481.server-he.de
+#   FTP_USERNAME    FTP-Benutzer aus dem HostEurope-KIS („FTP-Zugänge")
+#   FTP_PASSWORD    zugehöriges Passwort
+#   FTP_SERVER_DIR  Ordner der Domain dario-bruno.com auf dem Webspace + "karaoke/", z. B. /www/dario-bruno/karaoke/
+# Solange die Secrets fehlen, tut dieser Ablauf nichts (die Veröffentlichung über GitHub Pages läuft unabhängig weiter).
+name: Zu HostEurope hochladen
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: hosteurope
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    env:
+      FTP_SERVER: ${{ secrets.FTP_SERVER }}
+      FTP_SERVER_DIR: ${{ secrets.FTP_SERVER_DIR }}
+    steps:
+      - name: Zugangsdaten vorhanden?
+        id: cfg
+        run: |
+          if [ -z "$FTP_SERVER" ] || [ -z "$FTP_SERVER_DIR" ]; then
+            echo "FTP-Secrets fehlen – nichts zu tun."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Schutz: nur in einen eigenen Unterordner hochladen, niemals in den Hauptordner einer Website
+          case "$FTP_SERVER_DIR" in
+            */karaoke/) echo "ok=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::FTP_SERVER_DIR muss auf karaoke/ enden (eigener Unterordner), damit keine andere Website überschrieben wird."; exit 1 ;;
+          esac
+
+      - uses: actions/checkout@v4
+        if: steps.cfg.outputs.ok == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.cfg.outputs.ok == 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        if: steps.cfg.outputs.ok == 'true'
+      - run: npm test
+        if: steps.cfg.outputs.ok == 'true'
+      - run: npm run build
+        if: steps.cfg.outputs.ok == 'true'
+
+      - name: Per FTPS hochladen
+        if: steps.cfg.outputs.ok == 'true'
+        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          server-dir: ${{ secrets.FTP_SERVER_DIR }}
+          protocol: ftps
+          local-dir: ./dist/
+
+      - name: Erreichbarkeit prüfen (https ist für das Mikrofon Pflicht)
+        if: steps.cfg.outputs.ok == 'true'
+        run: |
+          sleep 5
+          code=$(curl -s -o /tmp/seite.html -w "%{http_code}" -L --max-time 30 https://dario-bruno.com/karaoke/ || true)
+          echo "Antwort: $code"
+          if [ "$code" = "200" ] && grep -q "Encore" /tmp/seite.html; then
+            echo "Die App ist unter https://dario-bruno.com/karaoke/ erreichbar."
+          else
+            echo "::error::Hochgeladen, aber https://dario-bruno.com/karaoke/ liefert nicht die App (Antwort $code). Prüfen: Zielordner richtig? Ist für die Domain ein SSL-Zertifikat aktiv?"
+            exit 1
+          fi
