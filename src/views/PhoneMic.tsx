@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Mic } from '../audio/mic'
 import { midiToName } from '../lib/pitch'
 import { joinHost, type ClientLink } from '../remote/link'
-import { Icon } from '../ui'
+import { Icon, Stars } from '../ui'
+import type { HostMsg } from '../remote/link'
 
 type State = 'idle' | 'starting' | 'on' | 'lost' | 'error'
 
@@ -14,6 +15,8 @@ export default function PhoneMic({ code }: { code: string }) {
   const [view, setView] = useState({ note: '', level: 0 })
   const [color, setColor] = useState('#a855f7')
   const [turn, setTurn] = useState({ you: false, song: '' })
+  const [score, setScore] = useState<{ score: number; label: string } | null>(null)
+  const [result, setResult] = useState<Extract<HostMsg, { k: 'r' }> | null>(null)
   const link = useRef<ClientLink | null>(null)
   const micRef = useRef<Mic | null>(null)
   const alive = useRef(true)
@@ -25,7 +28,12 @@ export default function PhoneMic({ code }: { code: string }) {
     link.current = await joinHost(code, { name: who }, (s) => {
       if (s === 'open') setState('on')
       else if (alive.current) { setState('lost'); setTimeout(() => { if (alive.current) void connect(who).catch(() => {}) }, 2500) } // von selbst neu verbinden
-    }, (m) => { if (m.k === 'w') setColor(m.color); else if (m.k === 't') setTurn({ you: m.you, song: m.song }) })
+    }, (m) => {
+      if (m.k === 'w') setColor(m.color)
+      else if (m.k === 't') { setTurn({ you: m.you, song: m.song }); if (m.you) { setResult(null); setScore(null) } }
+      else if (m.k === 's') setScore({ score: m.score, label: m.label })
+      else if (m.k === 'r') { setResult(m); setScore(null) }
+    })
   }
 
   const start = async () => {
@@ -62,6 +70,22 @@ export default function PhoneMic({ code }: { code: string }) {
       <div className="pointer-events-none absolute -top-40 h-96 w-96 rounded-full opacity-40 blur-3xl transition-colors duration-700" style={{ background: joined ? color : '#a855f7' }} />
       <div className="relative flex items-center gap-2.5 text-white/80"><span className="grad flex h-9 w-9 items-center justify-center rounded-xl"><Icon name="mic" size={18} /></span><span className="text-xl font-black tracking-tight">Encore</span></div>
 
+      {joined && result && (
+        <div data-testid="phone-result" className="pop fixed inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-ink/95 p-6 text-center backdrop-blur">
+          <p className="text-6xl">{result.of > 1 ? ['🥇', '🥈', '🥉'][result.rank - 1] ?? result.emoji : result.emoji}</p>
+          {result.of > 1 && <p className="text-xl font-bold" style={{ color }}>Platz {result.rank} von {result.of}</p>}
+          <h2 className="grad-text text-4xl font-black tracking-tight">{result.award}</h2>
+          <p className="text-white/60">{who} · {result.song}</p>
+          <p className="text-8xl font-black tabular-nums leading-none tracking-tighter">{result.total}<span className="ml-1 text-xl font-semibold tracking-normal text-white/40">/ 100</span></p>
+          <Stars value={result.stars} size={34} />
+          <div className="mt-2 grid w-full max-w-xs grid-cols-2 gap-3 text-left">
+            {[[result.pitchLabel, result.pitch], ['Einsatz', result.timing]].map(([label, v]) => (
+              <div key={label}><div className="flex justify-between text-sm font-bold"><span>{label}</span><span>{v}</span></div><div className="mt-1 h-2 overflow-hidden rounded-full bg-white/10"><div className="grad h-full rounded-full" style={{ width: `${v}%` }} /></div></div>
+            ))}
+          </div>
+          <button className="btn mt-4" onClick={() => setResult(null)}>Weiter</button>
+        </div>
+      )}
       {!joined ? (
         <div className="relative flex w-full max-w-sm flex-1 flex-col justify-center">
           <h1 className="text-4xl font-black leading-tight tracking-tight">{known && !edit ? <>Willkommen zurück, <span className="grad-text">{who}</span></> : <>Dein Handy wird zum <span className="grad-text">Mikrofon</span></>}</h1>
@@ -91,6 +115,12 @@ export default function PhoneMic({ code }: { code: string }) {
             </p>
             <p className="mt-1 text-white/60">{state === 'lost' ? 'Einen Moment bitte.' : turn.song ? turn.song : 'Sobald ein Song startet, geht es los.'}</p>
           </div>
+          {turn.you && score && !result && (
+            <div className="-mt-2 text-center">
+              <p data-testid="phone-score" className="grad-text text-6xl font-black tabular-nums leading-none">{score.score}</p>
+              <p className="mt-1 text-sm font-semibold uppercase tracking-[.25em] text-white/50">Punkte{score.label ? ` · ${score.label}` : ''}</p>
+            </div>
+          )}
           <ul className="space-y-1.5 text-left text-sm text-white/50">
             <li>🎤 Handy wie ein Mikrofon nah an den Mund</li>
             <li>📱 Diese Seite offen und den Bildschirm an lassen</li>

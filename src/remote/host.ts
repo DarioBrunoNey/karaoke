@@ -49,6 +49,11 @@ export function announceTurn(pids: string[], song: string) {
   for (const ph of byCid.values()) link?.send(ph.cid, { k: 't', you: pids.includes(ph.pid), song })
 }
 
+/** Nachricht an das Handy eines bestimmten Sängers (z. B. seine Punktzahl) */
+export function sendToPhone(pid: string, msg: import('./link').HostMsg) {
+  for (const ph of byCid.values()) if (ph.pid === pid) link?.send(ph.cid, msg)
+}
+
 export const hasPhone = (pid: string) => [...byCid.values()].some((p) => p.pid === pid)
 
 /**

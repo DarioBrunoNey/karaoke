@@ -125,7 +125,9 @@ async function run(mode, shot) {
     await pa.screenshot({ path: 'tests/shots/l3-handy-singt.png' })
     const micDialog = await page.getByTestId('mic-headphones').count()
     await page.getByTestId('rank-2').waitFor({ timeout: 30000 })
-    const out = { mode, total: +(await page.getByTestId('rank-1').locator('.grad-text').textContent()), pitch: +(await page.getByTestId('rank-2').locator('.grad-text').textContent()), state: phoneSays, note: micDialog ? 'Mikrofon-Dialog erschien' : rejoin, errors, played: true }
+    const own = await pa.getByTestId('phone-result').textContent({ timeout: 5000 }).catch(() => '')
+    await pa.screenshot({ path: 'tests/shots/l5-handy-ergebnis.png' })
+    const out = { mode, total: +(await page.getByTestId('rank-1').locator('.grad-text').textContent()), pitch: +(await page.getByTestId('rank-2').locator('.grad-text').textContent()), state: phoneSays, note: micDialog ? 'Mikrofon-Dialog erschien' : !/Platz [12] von 2/.test(own) ? 'keine Auswertung am Handy' : rejoin, errors, played: true }
     await ctx.close()
     return out
   }

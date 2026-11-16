@@ -5,7 +5,13 @@ export interface Hello { name: string }
 export interface PitchMsg { k: 'p'; m: number; l: number; /** Rohpegel */ r?: number }
 export interface HostHandlers { onOpen(cid: string, hello: Hello): void; onData(cid: string, msg: PitchMsg): void; onClose(cid: string): void }
 /** App → Handy: Begrüßung (Farbe des Sängers) und wer gerade singt */
-export type HostMsg = { k: 'w'; color: string } | { k: 't'; you: boolean; song: string }
+export type HostMsg =
+  | { k: 'w'; color: string }
+  | { k: 't'; you: boolean; song: string }
+  /** laufende Punktzahl während des Songs */
+  | { k: 's'; score: number; label: string }
+  /** eigene Auswertung nach dem Song */
+  | { k: 'r'; song: string; total: number; stars: number; award: string; emoji: string; pitch: number; pitchLabel: string; timing: number; rank: number; of: number }
 export interface HostLink { code: string; send(cid: string, msg: HostMsg): void; close(): void }
 export interface ClientLink { send(msg: PitchMsg): void; close(): void }
 

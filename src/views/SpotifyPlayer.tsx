@@ -14,7 +14,7 @@ import { engine } from '../audio/engine'
 import { mic, type MicMode } from '../audio/mic'
 import { browserTransport, lyricsFor, remoteTransport, type Transport } from '../spotify/api'
 import { findMelody } from '../spotify/melodyDb'
-import { announceTurn, hasPhone, phoneSample, resetPhoneGates } from '../remote/host'
+import { announceTurn, hasPhone, phoneSample, resetPhoneGates, sendToPhone } from '../remote/host'
 import PhonePanel from './PhonePanel'
 import { drawLane } from './pitchLane'
 import { MicDialog } from './Player'
@@ -187,8 +187,15 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
     const pl = planRef.current
     const pids = pl ? [...new Set(pl.flatMap((r) => r.pids))] : []
     const voice = p.current.micOn || turnPids.current.some(hasPhone)
+    // jedes Handy bekommt die Auswertung seines Besitzers
+    const tell = (pid: string, r: ScoreResult, rank: number, of: number) => sendToPhone(pid, {
+      k: 'r', song: track.name, total: r.total, stars: r.stars, award: r.award.title, emoji: r.award.emoji,
+      pitch: r.parts.pitch, pitchLabel: hasRef ? 'Tonhöhe' : 'Tonsicherheit', timing: r.parts.timing, rank, of,
+    })
     if (voice && pids.length > 1) {
-      setMulti(pids.map((pid) => ({ pid, r: score(sessFor(pid)) })).sort((a, b) => b.r.total - a.r.total))
+      const table = pids.map((pid) => ({ pid, r: score(sessFor(pid)) })).sort((a, b) => b.r.total - a.r.total)
+      table.forEach((row, i) => tell(row.pid, row.r, i + 1, table.length))
+      setMulti(table)
     } else if (voice && s) {
       const r = score(s)
       const who = profiles.find((x) => x.id === turnPids.current[0])
@@ -197,6 +204,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
         rank = await addScore({ songId: 'sp:' + track.id, songTitle: track.name, artist: track.artists, profileId: who.id, profileName: who.name, total: r.total, accuracy: r.accuracy, stars: r.stars, award: r.award.title })
       }
       setResult({ r, rank, withRef: hasRef })
+      tell(turnPids.current[0], r, 1, 1)
     }
     setPhase('ended')
   }, [hasRef, lines, profiles, addScore, track, sessFor])
@@ -208,7 +216,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
 
   useEffect(() => {
     if (phase !== 'ready') return
-    let raf = 0, idx = -2, lastUi = 0, started = false, prev = 0
+    let raf = 0, idx = -2, lastUi = 0, started = false, prev = 0, tickN = 0
     const loop = (now: number) => {
       raf = requestAnimationFrame(loop)
       const t = tr.current
@@ -301,6 +309,8 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
           all[pid] = { score: (hasRef ? ss.result() : freeScore(ss.user, FPS, lines)).total, state: lv?.state ?? 'none', note: lv?.midi ? midiToName(lv.midi) : '', level: lv?.level ?? 0 }
         }
         setLiveAll(all)
+        // jedem Handy seine eigene laufende Punktzahl schicken (etwa einmal pro Sekunde)
+        if (++tickN % 3 === 0) for (const pid of singers) if (hasPhone(pid)) sendToPhone(pid, { k: 's', score: all[pid].score, label: hasRef ? LIVE_LABEL[all[pid].state] : '' })
         if (all[singers[0]]) setLive(all[singers[0]])
         void l
       }
