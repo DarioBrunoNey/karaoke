@@ -1,9 +1,13 @@
 // Verwaltet die verbundenen Handy-Mikrofone auf der Seite der Karaoke-App.
 import type { MicSample } from '../audio/mic'
 import { openHost, type HostLink } from './link'
+import { BleedGate } from '../lib/bleed'
 
 export interface Phone { cid: string; name: string; pid: string }
-interface Live { midi: number; level: number; at: number }
+interface Live { midi: number; level: number; rms: number; at: number; used: number }
+// je Handy: wie laut kommt die Musik aus dem Fernseher dort an? Etwas strenger als beim eingebauten Mikrofon,
+// weil der Fernseher-Ton den ganzen Raum füllt.
+const gates = new Map<string, BleedGate>()
 
 const live = new Map<string, Live>() // je Sänger-Profil der zuletzt gemeldete Ton
 const byCid = new Map<string, Phone>()
@@ -31,7 +35,7 @@ export async function startPhoneHost(cb: HostCallbacks): Promise<string> {
     },
     onData: (cid, m) => {
       const ph = byCid.get(cid)
-      if (ph) live.set(ph.pid, { midi: m.m, level: m.l, at: performance.now() })
+      if (ph) live.set(ph.pid, { midi: m.m, level: m.l, rms: m.r ?? m.l / 6, at: performance.now(), used: 0 })
     },
     onClose: (cid) => { const ph = byCid.get(cid); if (ph) { byCid.delete(cid); live.delete(ph.pid); cb.onChange([...byCid.values()]) } },
   })
@@ -47,12 +51,23 @@ export function announceTurn(pids: string[], song: string) {
 
 export const hasPhone = (pid: string) => [...byCid.values()].some((p) => p.pid === pid)
 
-/** Aktueller Ton vom Handy dieses Sängers; null, wenn er kein Handy-Mikrofon hat */
-export function phoneSample(pid: string): MicSample | null {
+/**
+ * Aktueller Ton vom Handy dieses Sängers; null, wenn er kein Handy-Mikrofon hat.
+ * @param quiet true, wenn laut Song gerade niemand singen soll – dann wird gemessen, wie laut die Musik am Handy ankommt
+ */
+export function phoneSample(pid: string, quiet = false): MicSample | null {
   if (!hasPhone(pid)) return null
   const l = live.get(pid)
   if (!l || performance.now() - l.at > 300) return { midi: 0, level: 0, voiced: false }
-  return { midi: l.midi, level: l.level, voiced: l.midi > 0 }
+  let g = gates.get(pid)
+  if (!g) { g = new BleedGate(2.3); gates.set(pid, g) }
+  if (l.used !== l.at) { l.used = l.at; g.feed(l.rms, quiet) } // jeden Messwert nur einmal zählen
+  const voiced = l.midi > 0 && g.passes(l.rms)
+  return { midi: voiced ? l.midi : 0, level: l.level, voiced }
 }
+/** Pegel der mitgehörten Musik am Handy dieses Sängers */
+export const phoneBleed = (pid: string) => gates.get(pid)?.level ?? 0
+/** neuer Song: Messung neu beginnen (andere Lautstärke, andere Abmischung) */
+export const resetPhoneGates = () => gates.clear()
 
 export const phoneUrl = (code: string) => `${location.origin}${location.pathname}?mic=${code}${new URLSearchParams(location.search).has('bc') ? '&bc' : ''}`

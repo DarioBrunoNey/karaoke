@@ -156,3 +156,17 @@ import { parseUltraStar, syllableProgress } from '../src/lib/ultrastar.ts'
   assert.ok(Math.abs(b.lines[1].t - 17) < 0.05, 'exakte Fassung mit Bestätigung: ' + b.lines[1].t)
   console.log('Textfassungen OK')
 }
+{
+  // Musik-Ausblendung: Musik + Originalsänger kommen mit ~0,03 an, die eigene Stimme nah am Mikrofon mit ~0,15
+  const { BleedGate } = await import('../src/lib/bleed.ts')
+  const g = new BleedGate(2.3)
+  assert.ok(g.passes(0.01), 'vor der Messung wird nichts unterdrückt')
+  for (let i = 0; i < 60; i++) g.feed(0.02 + 0.012 * rnd(), true)   // Intro: nur Musik
+  for (let i = 0; i < 200; i++) g.feed(0.2, false)                    // Singen verändert die Messung nicht
+  console.log('Musikpegel gemessen:', g.level.toFixed(3))
+  assert.ok(g.level > 0.025 && g.level < 0.033)
+  assert.equal(g.passes(0.035), false, 'Originalsänger aus dem Lautsprecher zählt nicht')
+  assert.equal(g.passes(0.06), false, 'auch etwas lautere Stellen der Musik nicht')
+  assert.equal(g.passes(0.15), true, 'eigene Stimme zählt')
+  console.log('Musik-Ausblendung OK')
+}

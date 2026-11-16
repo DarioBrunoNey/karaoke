@@ -2,7 +2,7 @@
 // Standard: WebRTC-Datenkanal über PeerJS (öffentlicher Vermittlungsdienst nur zum Verbindungsaufbau).
 // Mit „?bc" in der Adresse: BroadcastChannel – verbindet zwei Tabs desselben Browsers (für Tests).
 export interface Hello { name: string }
-export interface PitchMsg { k: 'p'; m: number; l: number }
+export interface PitchMsg { k: 'p'; m: number; l: number; /** Rohpegel */ r?: number }
 export interface HostHandlers { onOpen(cid: string, hello: Hello): void; onData(cid: string, msg: PitchMsg): void; onClose(cid: string): void }
 /** App → Handy: Begrüßung (Farbe des Sängers) und wer gerade singt */
 export type HostMsg = { k: 'w'; color: string } | { k: 't'; you: boolean; song: string }

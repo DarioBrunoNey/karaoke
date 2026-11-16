@@ -43,7 +43,7 @@ export default function PhoneMic({ code }: { code: string }) {
       let n = 0
       setInterval(() => {
         const s = m.sample()
-        link.current?.send({ k: 'p', m: s.voiced ? Math.round(s.midi * 100) / 100 : 0, l: Math.round(s.level * 100) / 100 })
+        link.current?.send({ k: 'p', m: s.voiced ? Math.round(s.midi * 100) / 100 : 0, l: Math.round(s.level * 100) / 100, r: Math.round((s.rms ?? 0) * 10000) / 10000 })
         if (++n % 4 === 0) setView({ note: s.voiced ? midiToName(s.midi) : '', level: s.level })
       }, 40)
     } catch (e) {

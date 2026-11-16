@@ -14,7 +14,7 @@ import { engine } from '../audio/engine'
 import { mic, type MicMode } from '../audio/mic'
 import { browserTransport, lyricsFor, remoteTransport, type Transport } from '../spotify/api'
 import { findMelody } from '../spotify/melodyDb'
-import { announceTurn, hasPhone, phoneSample } from '../remote/host'
+import { announceTurn, hasPhone, phoneSample, resetPhoneGates } from '../remote/host'
 import PhonePanel from './PhonePanel'
 import { drawLane } from './pitchLane'
 import { MicDialog } from './Player'
@@ -195,7 +195,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   }, [hasRef, lines, profiles, addScore, track, sessFor])
   // den Handys mitteilen, welcher Song läuft und wer gerade singt
   useEffect(() => { announceTurn(phase === 'ready' ? turn.pids : [], phase === 'ended' ? '' : track.name) }, [turn.pids, phase, track.name])
-  useEffect(() => () => announceTurn([], ''), [])
+  useEffect(() => { resetPhoneGates(); return () => announceTurn([], '') }, [])
   const finishRef = useRef(finish)
   finishRef.current = finish
 
@@ -239,7 +239,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
       const silent = hasRef ? !s.refNear(fi, 18) : !pages.some((pg) => lt > pg.t - 0.5 && lt < pg.e + 0.6)
       if (!warned.current && mic.bleed > 0.02 && pos > 8) { warned.current = true; setBleed(true) }
       singers.forEach((pid, k) => {
-        const viaPhone = phoneSample(pid)
+        const viaPhone = phoneSample(pid, silent)
         const smp = viaPhone ?? (p.current.micOn ? (local ??= mic.sample(silent)) : null)
         const sess = sessFor(pid)
         if (smp && !t.paused() && active) {
