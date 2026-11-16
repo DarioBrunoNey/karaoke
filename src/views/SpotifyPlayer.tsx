@@ -103,6 +103,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   /** Hinweis: das Mikrofon hört die Musik mit */
   const [bleed, setBleed] = useState(false)
   const warned = useRef(false)
+  const switched = useRef(false)
   const [multi, setMulti] = useState<{ pid: string; r: ScoreResult }[] | null>(null)
   const sections = useMemo(() => findSections(lines.map((l, i) => ({ t: l.t, e: pages[i].e, text: l.text }))), [lines, pages])
 
@@ -252,7 +253,16 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
       // Soll gerade niemand singen (Intro, Zwischenspiel)? Dann misst das Mikrofon, wie laut die Musik bei ihm ankommt.
       const fi = Math.max(0, Math.round(lt * FPS))
       const silent = hasRef ? !s.refNear(fi, 18) : !pages.some((pg) => lt > pg.t - 0.5 && lt < pg.e + 0.6)
-      if (!warned.current && mic.bleed > 0.02 && pos > 8) { warned.current = true; setBleed(true) }
+      // Das Mikrofon hört die Musik mit: zuerst auf Echo-Unterdrückung umschalten (falls noch „Kopfhörer" eingestellt
+      // ist, aber über Lautsprecher gehört wird). Erst wenn auch das nicht reicht, den Hinweis zeigen.
+      if (p.current.micOn && mic.bleed > 0.02) {
+        if (mic.mode === 'headphones' && !switched.current) {
+          switched.current = true
+          setSettings({ micMode: 'speaker' })
+          void startMic('speaker')
+          say('Musik im Mikrofon erkannt – Echo-Unterdrückung eingeschaltet')
+        } else if (!warned.current && mic.mode === 'speaker' && mic.bleed > 0.04 && pos > 20) { warned.current = true; setBleed(true) }
+      }
       singers.forEach((pid, k) => {
         const viaPhone = phoneSample(pid, silent)
         const smp = viaPhone ?? (p.current.micOn ? (local ??= mic.sample(silent)) : null)
@@ -600,7 +610,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
 
       {bleed && phase === 'ready' && (
         <div className="rise fixed left-1/2 top-24 z-40 flex max-w-[92vw] -translate-x-1/2 items-center gap-3 rounded-2xl bg-yellow-300 px-4 py-3 text-sm font-semibold text-black shadow-2xl">
-          <span>Dein Mikrofon hört die Musik mit. Die App blendet sie aus – sing deutlich lauter als die Musik, oder nimm Kopfhörer bzw. ein Handy als Mikrofon. Sonst fallen die Punkte niedriger aus.</span>
+          <span>Die Musik ist im Mikrofon sehr laut. Stell sie etwas leiser oder nimm Kopfhörer – sonst erkennt die App deine Stimme schlecht.</span>
           <button className="shrink-0 cursor-pointer rounded-full bg-black/15 px-3 py-1" onClick={() => setBleed(false)}>OK</button>
         </div>
       )}

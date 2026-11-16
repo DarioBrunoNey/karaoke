@@ -17,7 +17,9 @@ async function run(mode, shot) {
     localStorage.setItem('encore-settings', JSON.stringify({ spotifyClientId: 'x'.repeat(32), micAsked: true, micMode: 'headphones' }))
     localStorage.setItem('encore-spotify-token', JSON.stringify({ access: 'tok', refresh: 'ref', exp: Date.now() + 3.6e6, clientId: 'x'.repeat(32) }))
     if (['melodie', 'falsch', 'duell', 'handys', 'mithoeren', 'lobby'].includes(mode)) localStorage.setItem('encore-us4-t1', US)
-    navigator.mediaDevices.getUserMedia = async () => {
+    navigator.mediaDevices.getUserMedia = async (c) => {
+      const aec = !!c?.audio?.echoCancellation
+      window.__aec = aec
       const ac = new AudioContext()
       const osc = ac.createOscillator(); osc.type = 'sawtooth'
       const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1500
@@ -33,7 +35,7 @@ async function run(mode, shot) {
         const n = NOTES.find((x) => now >= x[0] && now < x[0] + 0.8)
         if (mode === 'mithoeren') {
           // niemand singt: das Mikrofon hört nur die Musik samt Originalgesang aus dem Lautsprecher, gleichmäßig leise
-          osc.frequency.value = 440 * Math.pow(2, ((n ? n[1] : 55) - 69) / 12); g.gain.value = 0.06
+          osc.frequency.value = 440 * Math.pow(2, ((n ? n[1] : 55) - 69) / 12); g.gain.value = aec ? 0.004 : 0.12 // Echo-Unterdrückung entfernt die eigene Wiedergabe fast ganz
           return
         }
         if (n) { osc.frequency.value = 440 * Math.pow(2, (n[1] + shift - 69) / 12); g.gain.value = 0.3 } else g.gain.value = 0
@@ -213,7 +215,8 @@ async function run(mode, shot) {
   await page.waitForTimeout(700)
   if (shot) await page.screenshot({ path: `tests/shots/${shot}-auswertung.png` })
   const num = async (id) => +(await page.getByTestId(id).textContent()).replace(/\D.*$/, '')
-  const res = { mode, total: await num('total'), pitch: await num('part-pitch'), rhythm: await num('part-rhythm'), timing: await num('part-timing'), continuity: await num('part-continuity'), state, note, again: '', errors, played: calls.some((c) => c.startsWith('PUT /me/player/play?device_id=dev1')) }
+  const aecOn = await page.evaluate(() => window.__aec)
+  const res = { mode, total: await num('total'), pitch: await num('part-pitch'), rhythm: await num('part-rhythm'), timing: await num('part-timing'), continuity: await num('part-continuity'), state, note, again: '', aecOn, errors, played: calls.some((c) => c.startsWith('PUT /me/player/play?device_id=dev1')) }
   if (mode === 'melodie') {
     // zweiter Song in derselben Sitzung: der Spotify-Player wird wiederverwendet, nicht neu angemeldet
     await page.getByRole('button', { name: 'Nochmal' }).click()
@@ -235,7 +238,8 @@ const checks = [
   ['Noten automatisch gefunden und ausgerichtet (1,5 s Versatz): Sänger ≥ 80', by.auto.total >= 80 && by.auto.state === 'Treffer'],
   ['Duell über eine Strophe: richtiger Sänger gewinnt (≥ 80), der schiefe verliert (≤ 50)', by.duell.total >= 80 && by.duell.pitch <= 50 && by.duell.state.endsWith('Sänger 1')],
   ['Zwei Handy-Mikrofone gleichzeitig: beide Stimmen kommen getrennt an (C4 / E4), beide bekommen Punkte', by.handys.state === 'Anna singt C4, Ben singt E4' && by.handys.total > 0 && by.handys.pitch > 0 && by.handys.note === 'ok'],
-  ['Niemand singt, Mikrofon hört nur den Originalsänger aus dem Lautsprecher: keine Punkte (≤ 10)', by.mithoeren.total <= 10],
+  ['Niemand singt, Mikrofon hört laut den Originalsänger aus dem eigenen Lautsprecher: App schaltet auf Echo-Unterdrückung, keine Punkte (≤ 10)', by.mithoeren.total <= 10 && by.mithoeren.aecOn === true],
+  ['Mit Kopfhörern bleibt das Mikrofon unbearbeitet', by.melodie.aecOn === false],
   ['Zweiter Song direkt danach startet ohne neue Anmeldung', by.melodie.again === 'ok'],
   ['Lobby: zwei Handys scannen, Song wählen – beide singen automatisch gleichzeitig, Handy zeigt „Du singst!"', by.lobby.state === 'Du singst!' && by.lobby.note === 'ok' && by.lobby.total > 0],
   ['keine Browser-Fehler', results.every((r) => r.errors.length === 0)],

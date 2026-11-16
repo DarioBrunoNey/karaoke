@@ -40,6 +40,7 @@ export default function Player({ songId, profileId }: { songId: string; profileI
   const cd = useRef<HTMLDivElement>(null)
   const clock = useRef<HTMLSpanElement>(null)
   const done = useRef(false)
+  const switched = useRef(false)
   const started = useRef(false)
   const center = useRef(60)
   const liveRef = useRef<{ state: LiveState; midi: number; level: number }>({ state: 'none', midi: 0, level: 0 })
@@ -136,6 +137,11 @@ export default function Player({ songId, profileId }: { songId: string; profileI
       if (p.micOn && engine.playing) {
         // in Pausen der Melodie misst das Mikrofon, wie laut die Musik bei ihm ankommt
         const smp = mic.sample(!s.refNear(Math.max(0, Math.round(t * s.fps)), 18))
+        if (mic.bleed > 0.02 && mic.mode === 'headphones' && !switched.current) {
+          switched.current = true
+          setSettings({ micMode: 'speaker' }); void startMic('speaker')
+          say('Musik im Mikrofon erkannt – Echo-Unterdrückung eingeschaltet')
+        }
         const st = s.add(t - p.offset * p.tempo, smp.voiced ? smp.midi - p.pitch : 0)
         liveRef.current = { state: st, midi: smp.voiced ? smp.midi : 0, level: smp.level }
       }
@@ -161,7 +167,7 @@ export default function Player({ songId, profileId }: { songId: string; profileI
     }
     raf = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(raf)
-  }, [phase, lyrics, lineEnds, pages])
+  }, [phase, lyrics, lineEnds, pages, setSettings, startMic, say])
 
   const toggle = useCallback(() => {
     if (phase !== 'ready') return

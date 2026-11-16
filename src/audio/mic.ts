@@ -20,7 +20,9 @@ export class Mic {
   private last = 0
   private stable = 0
   /** Pegel in Phasen, in denen niemand singen soll (Intro, Pausen) – das ist die Musik, die das Mikrofon mithört */
-  private gate = new BleedGate(2)
+  // Obergrenze 0,06: Eine Stimme nah am Mikrofon liegt darüber. Ist die Musik selbst so laut (Handy-Lautsprecher
+  // direkt neben dem Mikrofon), hilft nur die Echo-Unterdrückung – die Wiedergabe-Ansicht schaltet dann darauf um.
+  private gate = new BleedGate(2, 0.06)
   /** Pegel der mitgehörten Musik (0 = nichts). Ab ~0,02 verfälscht sie die Wertung spürbar. */
   get bleed() { return this.gate.level }
   mode: MicMode = 'headphones'
