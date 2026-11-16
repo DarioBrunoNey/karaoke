@@ -48,8 +48,8 @@ export default function Info() {
         </div>
         <label className="block pt-2">
           <span className="label">Mikrofon-Verzögerung ausgleichen: {settings.micOffsetMs} ms</span>
-          <input type="range" min={0} max={400} step={10} value={settings.micOffsetMs} onChange={(e) => setSettings({ micOffsetMs: +e.target.value })} className="w-full" />
-          <span className="text-sm text-white/50">Bei Bluetooth-Kopfhörern/-Boxen oder Fernsehern mit Bildverzögerung erhöhen (typisch 150–300 ms).</span>
+          <input type="range" min={0} max={1500} step={10} value={settings.micOffsetMs} onChange={(e) => setSettings({ micOffsetMs: +e.target.value })} className="w-full" />
+          <span className="text-sm text-white/50">Bei Bluetooth-Kopfhörern/-Boxen erhöhen (typisch 150–300 ms). Wird das Bild drahtlos auf den Fernseher übertragen, kommt der Ton dort später an – dann deutlich erhöhen (300–1000 ms), bis Treffer wieder als Treffer zählen.</span>
         </label>
       </Card>
       <Card title="Gesangstrennung">
