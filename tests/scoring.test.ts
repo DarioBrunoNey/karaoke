@@ -182,7 +182,7 @@ import { parseUltraStar, syllableProgress } from '../src/lib/ultrastar.ts'
   late.shift(lag)
   const after = late.result()
   console.log('Versatz erkannt:', lag, 'Frames (=', lag / fps, 's) | Punkte vorher', before.total, '→ nachher', after.total)
-  assert.equal(lag, 15); assert.ok(before.total < 80 && after.total >= 95)
+  assert.ok(Math.abs(lag - 15) <= 1, 'Versatz ' + lag); assert.ok(before.total < 80 && after.total >= 95)
   // pünktlicher Sänger: nichts verschieben
   const onTime = new ScoreSession({ fps, data: mel, source: 'stems' })
   for (let i = 0; i < mel.length; i++) onTime.add(i / fps, mel[i])
@@ -225,4 +225,17 @@ import { parseUltraStar, syllableProgress } from '../src/lib/ultrastar.ts'
   assert.ok(wrongTime.r.total < 45)
   assert.equal(spoken.s.estimateLag(), 0, 'kurze Noten verfälschen die Versatz-Erkennung nicht')
   console.log('Sprechgesang OK')
+}
+{
+  // Lange gehaltene Töne (Ballade): früher wurde hier zu wenig ausgeglichen, weil viele Verschiebungen „gleich gut" passen
+  const mel = new Float32Array(fps * 80)
+  for (let i = fps * 3; i < mel.length; i++) { const k = Math.floor(i / 60); if (i % 60 < 50) mel[i] = 58 + ((k * 3) % 7) }
+  for (const lagTrue of [6, 12, 20]) {
+    const s = new ScoreSession({ fps, data: mel, source: 'stems' })
+    for (let i = 0; i < mel.length - lagTrue; i++) s.add((i + lagTrue) / fps, mel[i] ? mel[i] + 0.3 * Math.sin(i / 5) : 0)
+    const est = s.estimateLag()
+    console.log('gehaltene Töne: echter Versatz', lagTrue * 20, 'ms → erkannt', est * 20, 'ms')
+    assert.ok(Math.abs(est - lagTrue) <= 1, 'Versatz ' + lagTrue + ' erkannt als ' + est)
+  }
+  console.log('Versatz bei gehaltenen Tönen OK')
 }

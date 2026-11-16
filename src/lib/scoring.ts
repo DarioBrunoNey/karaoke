@@ -136,14 +136,19 @@ export class ScoreSession {
       if (c > bestCount) { bestCount = c; best = lag }
     }
     // nur bei klarem Befund: genug Treffer, und deutlich mehr als ohne Verschiebung
-    if (bestCount < 100 || bestCount < zero * 1.12 + 10 || Math.abs(best) < 2) return 0
-    // Schwerpunkt um das Maximum – glättet das Ergebnis
-    let sw = 0, sx = 0
-    for (let lag = best - 3; lag <= best + 3; lag++) {
-      const c = counts[lag + maxEarly]
-      if (c !== undefined && c > bestCount * 0.9) { sw += c; sx += c * lag }
-    }
-    return Math.round(sx / sw)
+    // Eindeutig muss es sein: Bei echtem Versatz passt es an genau einer Stelle viel besser als anderswo.
+    // Wer schief singt, erzeugt nur zufällige kleine Ausschläge – daraus darf kein „Versatz" werden.
+    const worst = Math.min(...counts)
+    if (bestCount < 60 || bestCount < worst * 1.6 + 20) return 0
+    // Bei gehaltenen Tönen passen mehrere Verschiebungen gleich gut (ein Plateau). Das erste Maximum zu nehmen
+    // würde systematisch zu wenig ausgleichen – richtig ist die Mitte des Plateaus.
+    let lo = best, hi = best
+    while (counts[lo - 1 + maxEarly] !== undefined && counts[lo - 1 + maxEarly] >= bestCount * 0.97) lo--
+    while (counts[hi + 1 + maxEarly] !== undefined && counts[hi + 1 + maxEarly] >= bestCount * 0.97) hi++
+    const mid = Math.round((lo + hi) / 2)
+    // nur bei klarem Befund: ohne Verschiebung muss es merklich schlechter passen als in der Plateau-Mitte
+    if (zero >= bestCount * 0.97 || Math.abs(mid) < 1) return 0
+    return mid
   }
 
   /** Verschiebt alles bisher Aufgenommene um n Frames nach vorn (positiv = früher) – nach erkanntem Versatz */

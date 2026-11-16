@@ -323,7 +323,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
           setTurn((cur) => (cur.next === soon ? cur : { ...cur, next: soon }))
         }
         // Alle 5 s prüfen, ob die Stimme insgesamt versetzt ankommt (z. B. Ton über Funk am Fernseher) – und ausgleichen
-        if (hasRef && now - lagCheck.current > 5000 && pos > 25) {
+        if (hasRef && now - lagCheck.current > 3000 && pos > 12) {
           lagCheck.current = now
           for (const pid of singers) {
             const ss = sessFor(pid), kind = hasPhone(pid) ? 'phone' : 'local'
@@ -381,6 +381,15 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
     setTurn({ pids: turnPids.current, label: rounds?.[0].label ?? '', next: '' })
     setResult(null); setMulti(null); setShowMode(false); setLiveAll({})
     void t.seek(Math.max(0, (rounds ? rounds[0].s - LEAD : 0) + offset)).then(() => { if (t.paused()) void t.toggle() })
+  }
+  /** Stimm-Verzögerung von Hand nachstellen (Schritte von 40 ms); wirkt sofort, auch auf das schon Gesungene */
+  const nudgeLag = (frames: number) => {
+    const kind = turnPids.current.some(hasPhone) ? 'phone' : 'local'
+    for (const pid of turnPids.current) if ((hasPhone(pid) ? 'phone' : 'local') === kind) sessFor(pid).shift(frames)
+    autoLag.current[kind] = Math.max(-0.2, Math.min(1.5, autoLag.current[kind] + frames / FPS))
+    localStorage.setItem('encore-lag-' + kind, autoLag.current[kind].toFixed(2))
+    lagCheck.current = performance.now() + 20000 // der Automatik eine Weile nicht dazwischenfunken lassen
+    setLagShown(autoLag.current[kind] || 0.0001)
   }
   const applyMelody = (text: string | null) => {
     if (text === null) { localStorage.setItem(usKey(track.id), '-'); setUs(null); setNotes('none'); setShowMelody(false); return }
@@ -639,9 +648,20 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 py-4">
               <span className="w-32 shrink-0 font-bold">Mikrofon</span>
               <span className="flex-1 text-white/70">{voiceOn && !micOn ? 'Handy-Mikrofon' : !micOn ? 'Aus' : settings.micMode === 'speaker' ? 'Dieses Gerät · Lautsprecher' : 'Dieses Gerät · Kopfhörer'}
-                {(lagShown || autoLag.current.phone || autoLag.current.local) ? <span className="block text-sm text-white/45">Verzögerung selbst erkannt: {((lagShown || (voiceOn && !micOn ? autoLag.current.phone : autoLag.current.local)) * 1000).toFixed(0)} ms</span> : null}</span>
+</span>
               <button className="btn" onClick={() => { setShowSettings(false); setShowMic(true) }}>Ändern</button>
             </div>
+            {voiceOn && (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 py-4">
+                <span className="w-32 shrink-0 font-bold">Stimm-Verzögerung</span>
+                <div className="flex items-center rounded-full bg-white/10">
+                  <button data-testid="lag-minus" className="h-11 cursor-pointer rounded-full px-4 font-bold hover:bg-white/15" onClick={() => nudgeLag(-2)} aria-label="Weniger Verzögerung ausgleichen">−</button>
+                  <span data-testid="lag-value" className="w-24 text-center font-bold tabular-nums">{Math.round((lagShown > 0.001 || lagShown < 0 ? lagShown : turn.pids.some((pid) => phones.some((ph) => ph.pid === pid)) ? autoLag.current.phone : autoLag.current.local) * 1000)} ms</span>
+                  <button data-testid="lag-plus" className="h-11 cursor-pointer rounded-full px-4 font-bold hover:bg-white/15" onClick={() => nudgeLag(2)} aria-label="Mehr Verzögerung ausgleichen">+</button>
+                </div>
+                <span className="basis-full text-sm text-white/50">Die App stellt das selbst ein. Füllen sich die Röhren trotzdem erst hinter dem Zeiger: „+“ drücken. Füllen sie sich zu früh: „−“.</span>
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 py-4">
               <span className="w-32 shrink-0 font-bold">Wiedergabe</span>
               <span className="flex-1 text-white/70">Spotify · {device}</span>
