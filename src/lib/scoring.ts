@@ -1,9 +1,18 @@
 import { foldSemis } from './pitch.ts'
 import type { Melody, ScoreResult } from './types.ts'
 
-const W_PITCH = 0.6, W_RHYTHM = 0.15, W_TIMING = 0.1, W_CONT = 0.15
-/** Erwartungswert der Tonhöhenwertung bei zufälliger Tonhöhe – wird herausgerechnet */
-const CHANCE = 0.22
+const W_PITCH = 0.7, W_RHYTHM = 0.1, W_TIMING = 0.1, W_CONT = 0.1
+
+export type Difficulty = 'leicht' | 'mittel' | 'schwer'
+/**
+ * Toleranzen in Halbtönen: bis `full` volle Wertung, ab `zero` keine, bis `hit` zählt der Ton als getroffen.
+ * `chance` ist der Erwartungswert bei zufälliger Tonhöhe und wird herausgerechnet (Brummen bringt nichts).
+ */
+export const LEVELS: Record<Difficulty, { hit: number; full: number; zero: number; chance: number }> = {
+  leicht: { hit: 1.25, full: 0.7, zero: 2.0, chance: 0.225 },
+  mittel: { hit: 0.8, full: 0.5, zero: 1.3, chance: 0.15 },
+  schwer: { hit: 0.5, full: 0.35, zero: 0.9, chance: 0.105 },
+}
 
 export const AWARDS = [
   { min: 92, title: 'Superstar', emoji: '🌟', text: 'Stadion ausverkauft. Zugabe!' },
@@ -32,8 +41,10 @@ export class ScoreSession {
   private lastIdx = -10
   private phrases: Phrase[]
   private refCount = 0
+  readonly tol: (typeof LEVELS)[Difficulty]
 
-  constructor(melody: Melody, firstLyric = 0) {
+  constructor(melody: Melody, firstLyric = 0, level: Difficulty = 'mittel') {
+    this.tol = LEVELS[level]
     this.fps = melody.fps
     this.ref = melody.data.slice()
     // Vor der ersten Textzeile wird nicht bewertet (Intro)
@@ -60,7 +71,7 @@ export class ScoreSession {
     if (!target) return 'none'
     if (midi <= 0) return 'silent'
     const d = foldSemis(midi - target)
-    return Math.abs(d) <= 1 ? 'hit' : d > 0 ? 'high' : 'low'
+    return Math.abs(d) <= this.tol.hit ? 'hit' : d > 0 ? 'high' : 'low'
   }
 
   refNear(i: number, w: number): number {
@@ -81,7 +92,7 @@ export class ScoreSession {
       if (ref[i] <= 0 || user[i] < 0) continue
       total++
       for (let j = Math.max(0, i - W); j <= Math.min(ref.length - 1, i + W); j++) {
-        if (user[j] > 0 && Math.abs(foldSemis(user[j] - ref[i])) <= 1) { hit++; break }
+        if (user[j] > 0 && Math.abs(foldSemis(user[j] - ref[i])) <= this.tol.hit) { hit++; break }
       }
     }
     return total >= 10 ? hit / total : null
@@ -90,7 +101,8 @@ export class ScoreSession {
   result(): ScoreResult {
     const { ref, user, fps } = this
     const n = ref.length
-    const W = Math.round(0.08 * fps)   // ±80 ms Toleranz für Tonhöhenvergleich
+    const W = Math.round(0.06 * fps)   // ±60 ms Toleranz für Tonhöhenvergleich
+    const { hit, full, zero, chance } = this.tol
     const WA = Math.round(0.15 * fps)  // ±150 ms für „singt / singt nicht"
 
     let refRec = 0, sung = 0, pitchSum = 0, exact = 0
@@ -103,13 +115,13 @@ export class ScoreSession {
       }
       if (best === 99) continue
       sung++
-      if (best <= 1) exact++
-      pitchSum += best <= 0.6 ? 1 : best >= 2 ? 0 : (2 - best) / 1.4
+      if (best <= hit) exact++
+      pitchSum += best <= full ? 1 : best >= zero ? 0 : (zero - best) / (zero - full)
     }
     const coverage = refRec ? sung / refRec : 0
     const rawPitch = sung ? pitchSum / sung : 0
     // Zufallstreffer herausrechnen; wer nur wenige Töne singt, bekommt nicht die volle Tonhöhenwertung
-    const pitch = Math.max(0, (rawPitch - CHANCE) / (1 - CHANCE)) * Math.min(1, coverage / 0.3)
+    const pitch = Math.max(0, (rawPitch - chance) / (1 - chance)) * Math.min(1, coverage / 0.3)
     const accuracy = sung ? exact / sung : 0
 
     // Rhythmus: Deckung von „Stimme aktiv" zwischen Sänger und Original (F1-Maß)

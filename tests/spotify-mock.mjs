@@ -16,7 +16,7 @@ async function run(mode, shot) {
   await page.addInitScript(({ mode, US, NOTES }) => {
     localStorage.setItem('encore-settings', JSON.stringify({ spotifyClientId: 'x'.repeat(32), micAsked: true, micMode: 'headphones' }))
     localStorage.setItem('encore-spotify-token', JSON.stringify({ access: 'tok', refresh: 'ref', exp: Date.now() + 3.6e6, clientId: 'x'.repeat(32) }))
-    if (['melodie', 'falsch', 'duell', 'handys'].includes(mode)) localStorage.setItem('encore-us3-t1', US)
+    if (['melodie', 'falsch', 'duell', 'handys', 'mithoeren'].includes(mode)) localStorage.setItem('encore-us3-t1', US)
     navigator.mediaDevices.getUserMedia = async () => {
       const ac = new AudioContext()
       const osc = ac.createOscillator(); osc.type = 'sawtooth'
@@ -31,6 +31,11 @@ async function run(mode, shot) {
         const shift = mode === 'falsch' || (mode === 'duell' && annaTurn) ? 4 : 0
         const now = raw + 0.03
         const n = NOTES.find((x) => now >= x[0] && now < x[0] + 0.8)
+        if (mode === 'mithoeren') {
+          // niemand singt: das Mikrofon hört nur die Musik samt Originalgesang aus dem Lautsprecher, gleichmäßig leise
+          osc.frequency.value = 440 * Math.pow(2, ((n ? n[1] : 55) - 69) / 12); g.gain.value = 0.06
+          return
+        }
         if (n) { osc.frequency.value = 440 * Math.pow(2, (n[1] + shift - 69) / 12); g.gain.value = 0.3 } else g.gain.value = 0
       }, 5)
       return dest.stream
@@ -141,7 +146,7 @@ async function run(mode, shot) {
     await ctx.close()
     return out
   }
-  const want = mode === 'frei' ? 'Stimme erkannt' : mode === 'falsch' ? 'Zu hoch' : 'Treffer'
+  const want = mode === 'frei' ? 'Stimme erkannt' : mode === 'falsch' ? 'Zu hoch' : mode === 'mithoeren' ? 'Sing!' : 'Treffer'
   const state = await page.waitForFunction((w) => document.querySelector('[data-testid=live-state]')?.textContent === w, want, { timeout: 9000 }).then(() => want).catch(() => 'nie: ' + want)
   const note = await page.getByTestId('live-note').textContent({ timeout: 500 }).catch(() => '')
   if (shot) { await page.mouse.move(800, 300); await page.waitForTimeout(500); await page.screenshot({ path: `tests/shots/${shot}-singen.png` }) }
@@ -154,7 +159,7 @@ async function run(mode, shot) {
   return res
 }
 
-const results = await Promise.all([run('frei', 's3'), run('melodie', 's4'), run('falsch'), run('auto', 's5'), run('duell'), run('handys')])
+const results = await Promise.all([run('frei', 's3'), run('melodie', 's4'), run('falsch'), run('auto', 's5'), run('duell'), run('handys'), run('mithoeren')])
 console.table(results.map(({ errors, ...r }) => r))
 const by = Object.fromEntries(results.map((r) => [r.mode, r]))
 const checks = [
@@ -165,6 +170,7 @@ const checks = [
   ['Noten automatisch gefunden und ausgerichtet (1,5 s Versatz): Sänger ≥ 80', by.auto.total >= 80 && by.auto.state === 'Treffer'],
   ['Duell über eine Strophe: richtiger Sänger gewinnt (≥ 80), der schiefe verliert (≤ 50)', by.duell.total >= 80 && by.duell.pitch <= 50 && by.duell.state.endsWith('Sänger 1')],
   ['Zwei Handy-Mikrofone gleichzeitig: beide Stimmen kommen getrennt an (C4 / E4), beide bekommen Punkte', by.handys.state === 'Anna singt C4, Ben singt E4' && by.handys.total > 0 && by.handys.pitch > 0 && by.handys.note === 'ok'],
+  ['Niemand singt, Mikrofon hört nur den Originalsänger aus dem Lautsprecher: keine Punkte (≤ 10)', by.mithoeren.total <= 10],
   ['keine Browser-Fehler', results.every((r) => r.errors.length === 0)],
 ]
 for (const [n, ok] of checks) console.log(ok ? '✓' : '✗', n)

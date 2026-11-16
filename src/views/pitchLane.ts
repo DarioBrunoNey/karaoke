@@ -78,7 +78,7 @@ export function drawLane(cv: HTMLCanvasElement | null, s: ScoreSession, t: numbe
       const target = s.refNear(i, 4)
       if (target) {
         const d = foldSemis(u - target)
-        if (Math.abs(d) <= 1) { kind = 'hit'; yy = y(Math.round(target)) }
+        if (Math.abs(d) <= s.tol.hit) { kind = 'hit'; yy = y(Math.round(target)) }
         else { kind = d > 0 ? 'high' : 'low'; yy = y(Math.round(target) + Math.round(d)) }
       } else { kind = 'free'; yy = y(Math.round(mid + foldSemis(u - mid))) }
     }
@@ -114,7 +114,7 @@ export function drawLane(cv: HTMLCanvasElement | null, s: ScoreSession, t: numbe
     const target = s.refNear(Math.min(ref.length - 1, Math.max(0, Math.round(t * fps))), 4)
     const base = target || mid
     const d = foldSemis(userNow - base)
-    const hit = !!target && Math.abs(d) <= 1
+    const hit = !!target && Math.abs(d) <= s.tol.hit
     g.shadowColor = hit ? '#34d399' : target ? '#ff3d81' : '#c264f5'; g.shadowBlur = 22 * dpr
     g.fillStyle = hit ? '#7dffc8' : '#fff'
     g.beginPath(); g.arc(nx, y(base + d), Math.max(7 * dpr, bh * 0.42), 0, Math.PI * 2); g.fill()

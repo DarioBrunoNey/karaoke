@@ -5,6 +5,7 @@ import { importAudioFile, isAudioFile } from './lib/importSong'
 import type { Profile, QueueItem, ScoreEntry, ScoreResult, Song, SpTrack } from './lib/types'
 import { finishLogin } from './spotify/api'
 import type { MicMode } from './audio/mic'
+import type { Difficulty } from './lib/scoring'
 import { engine } from './audio/engine'
 import { phoneUrl, startPhoneHost, type Phone } from './remote/host'
 
@@ -12,11 +13,12 @@ export interface Settings {
   micMode: MicMode | 'off'
   micAsked: boolean
   micOffsetMs: number
+  difficulty: Difficulty
   volume: number
   demucsUrl: string
   spotifyClientId: string
 }
-const DEFAULTS: Settings = { micMode: 'headphones', micAsked: false, micOffsetMs: 90, volume: 0.9, demucsUrl: '', spotifyClientId: '' }
+const DEFAULTS: Settings = { micMode: 'headphones', micAsked: false, micOffsetMs: 90, difficulty: 'mittel', volume: 0.9, demucsUrl: '', spotifyClientId: '' }
 const loadSettings = (): Settings => {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem('encore-settings') || '{}') } } catch { return DEFAULTS }
 }

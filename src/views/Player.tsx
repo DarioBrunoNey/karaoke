@@ -80,7 +80,7 @@ export default function Player({ songId, profileId }: { songId: string; profileI
         const { melody, mode } = await engine.load(song, (stage, p) => !cancelled && setProgress({ stage, p }))
         if (cancelled) return
         if (!song.melody || song.melody.source !== melody.source) void updateSong(song.id, { melody })
-        session.current = new ScoreSession(melody, song.lyrics?.[0]?.t ?? 0)
+        session.current = new ScoreSession(melody, song.lyrics?.[0]?.t ?? 0, settings.difficulty)
         const m = melody.data.filter((x) => x > 0)
         if (m.length) center.current = m[m.length >> 1]
         setSepMode(mode)
@@ -134,7 +134,8 @@ export default function Player({ songId, profileId }: { songId: string; profileI
       const p = params.current
       const s = session.current!
       if (p.micOn && engine.playing) {
-        const smp = mic.sample()
+        // in Pausen der Melodie misst das Mikrofon, wie laut die Musik bei ihm ankommt
+        const smp = mic.sample(!s.refNear(Math.max(0, Math.round(t * s.fps)), 30))
         const st = s.add(t - p.offset * p.tempo, smp.voiced ? smp.midi - p.pitch : 0)
         liveRef.current = { state: st, midi: smp.voiced ? smp.midi : 0, level: smp.level }
       }

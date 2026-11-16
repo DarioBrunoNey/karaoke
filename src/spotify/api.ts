@@ -241,9 +241,14 @@ export async function browserTransport(track: SpTrack, volume: number): Promise<
   })
   try { await player.activateElement?.() } catch { /* nur auf Mobilgeräten nötig */ }
   // Das neue Gerät ist bei Spotify manchmal erst nach einem Moment bekannt
+  // (auf Handys teils mehrere Sekunden) – deshalb geduldig wiederholen und das Gerät zwischendurch aktiv anmelden
   for (let i = 0; ; i++) {
     try { await playOn(track.uri, deviceId); break }
-    catch (e) { if (i >= 3) { clearInterval(sync); player.disconnect(); throw e } await new Promise((r) => setTimeout(r, 700)) }
+    catch (e) {
+      if (i >= 9) { clearInterval(sync); player.disconnect(); throw e }
+      await new Promise((r) => setTimeout(r, 600 + i * 250))
+      if (i % 3 === 1) await api('/me/player', { method: 'PUT', body: JSON.stringify({ device_ids: [deviceId], play: false }) }).catch(() => {})
+    }
   }
   return {
     kind: 'browser', deviceName: 'dieses Gerät',

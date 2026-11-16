@@ -37,6 +37,15 @@ export default function Info() {
       <Card title="Mikrofon & Datenschutz">
         <p>Das Mikrofonsignal wird ausschließlich auf diesem Gerät in Echtzeit analysiert. Es wird <b className="text-white">nichts aufgezeichnet und nichts übertragen</b>. Songs, Profile und Ergebnisse liegen nur im Browser-Speicher dieses Geräts.</p>
         <p><b className="text-white">Kopfhörer-Modus</b> liefert die genaueste Bewertung. Im <b className="text-white">Lautsprecher-Modus</b> filtert die Echo-Unterdrückung des Browsers die Musik aus dem Mikrofonsignal – das klappt gut bei moderater Lautstärke, aber nie perfekt.</p>
+        <div className="pt-2">
+          <span className="label">Schwierigkeit der Bewertung</span>
+          <div className="flex flex-wrap gap-2">
+            {([['leicht', 'Leicht', '±1¼ Halbtöne'], ['mittel', 'Mittel', '±¾ Halbton'], ['schwer', 'Schwer', '±½ Halbton']] as const).map(([id, name, tol]) => (
+              <button key={id} onClick={() => setSettings({ difficulty: id })} className={`chip ${settings.difficulty === id ? 'chip-on' : ''}`}>{name} <span className="font-normal opacity-60">{tol}</span></button>
+            ))}
+          </div>
+          <span className="text-sm text-white/50">So genau muss ein Ton sitzen, damit er als getroffen zählt. Gilt ab dem nächsten Song.</span>
+        </div>
         <label className="block pt-2">
           <span className="label">Mikrofon-Verzögerung ausgleichen: {settings.micOffsetMs} ms</span>
           <input type="range" min={0} max={400} step={10} value={settings.micOffsetMs} onChange={(e) => setSettings({ micOffsetMs: +e.target.value })} className="w-full" />

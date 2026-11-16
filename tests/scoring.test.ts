@@ -21,7 +21,7 @@ const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
 
 const perfect = perform((_, r) => r)
 const octaveDown = perform((_, r) => (r ? r - 12 : 0))
-const slightlyOff = perform((_, r) => (r ? r + 1.3 : 0))
+const slightlyOff = perform((_, r) => (r ? r + 0.9 : 0))
 const wrongKey = perform((_, r) => (r ? r + 4 : 0))
 const drone = perform((_, r) => (r ? 61.3 : 0))
 const silent = perform(() => 0)
@@ -35,9 +35,17 @@ show('Brummer', drone); show('stumm', silent); show('0,4 s zu spät', late); sho
 
 assert.ok(perfect.total >= 97, 'perfekter Auftritt')
 assert.ok(octaveDown.total >= 97, 'Oktave egal')
-assert.ok(slightlyOff.total > 50 && slightlyOff.total < 85)
-assert.ok(wrongKey.total < 45 && wrongKey.parts.pitch === 0)
-assert.ok(drone.total < 50)
+assert.ok(slightlyOff.total > 40 && slightlyOff.total < 75, 'knapp daneben: ' + slightlyOff.total)
+{
+  // Schwierigkeit: derselbe Auftritt (0,7 Halbtöne daneben) – leicht = Treffer, mittel = knapp, schwer = daneben
+  const lv = (level: 'leicht' | 'mittel' | 'schwer') => { const s = new ScoreSession(melody, 0, level); for (let i = 0; i < ref.length; i++) s.add(i / fps, ref[i] ? ref[i] + 0.7 : 0); return s.result() }
+  const [l, m, h] = [lv('leicht'), lv('mittel'), lv('schwer')]
+  console.log('0,7 Halbtöne daneben → leicht', l.parts.pitch, '/ mittel', m.parts.pitch, '/ schwer', h.parts.pitch, '| getroffen %:', l.accuracy, m.accuracy, h.accuracy)
+  assert.ok(l.parts.pitch === 100 && m.parts.pitch > 55 && m.parts.pitch < 80 && h.parts.pitch < 40)
+  assert.ok(l.accuracy === 100 && m.accuracy === 100 && h.accuracy < 10)
+}
+assert.ok(wrongKey.total <= 30 && wrongKey.parts.pitch === 0)
+assert.ok(drone.total < 40)
 assert.equal(silent.total, 0)
 assert.ok(late.parts.timing < 70 && late.total < perfect.total)
 assert.ok(always.parts.rhythm < perfect.parts.rhythm)

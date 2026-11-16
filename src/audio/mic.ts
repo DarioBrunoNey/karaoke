@@ -18,6 +18,11 @@ export class Mic {
   private floor = 0.002
   private last = 0
   private stable = 0
+  /** Pegel in Phasen, in denen niemand singen soll (Intro, Pausen) – das ist die Musik, die das Mikrofon mithört */
+  private quiet: number[] = []
+  private quietSorted: number[] = []
+  /** Pegel der mitgehörten Musik (0 = nichts). Ab ~0,02 verfälscht sie die Wertung spürbar. */
+  bleed = 0
   mode: MicMode = 'headphones'
   active = false
 
@@ -44,6 +49,7 @@ export class Mic {
     const size = Math.floor(2048 / this.factor)
     this.yin = new Yin(ctx.sampleRate / this.factor, size, 75, 1000)
     this.floor = 0.002
+    this.quiet = []; this.bleed = 0
     this.active = true
   }
 
@@ -54,7 +60,12 @@ export class Mic {
     this.active = false
   }
 
-  sample(): MicSample {
+  /**
+   * @param expectSilence true, wenn laut Song gerade niemand singen soll. In diesen Phasen wird gemessen, wie laut
+   *   die Musik im Mikrofon ankommt; nur was deutlich lauter ist, zählt danach als eigene Stimme. So bekommt der
+   *   Originalsänger aus dem Lautsprecher keine Punkte.
+   */
+  sample(expectSilence = false): MicSample {
     if (!this.analyser || !this.yin) return { midi: 0, level: 0, voiced: false }
     this.analyser.getFloatTimeDomainData(this.raw)
     decimate(this.raw, this.factor, this.dec)
@@ -62,8 +73,18 @@ export class Mic {
     const r = this.yin.detect(this.dec, 0, speaker ? 0.1 : 0.15)
     // adaptiver Grundpegel: folgt leisen Phasen schnell, lauten nur sehr träge
     this.floor += (r.rms > this.floor ? 0.003 : 0.25) * (r.rms - this.floor)
-    const gate = Math.max(speaker ? 0.012 : 0.006, this.floor * (speaker ? 2.2 : 1.6))
-    let midi = r.hz > 0 && r.rms > gate ? hzToMidi(r.hz) : 0
+    if (expectSilence) {
+      this.quiet.push(r.rms)
+      if (this.quiet.length > 400) this.quiet.shift()
+      if (this.quiet.length >= 40 && this.quiet.length % 10 === 0) {
+        this.quietSorted = [...this.quiet].sort((a, b) => a - b)
+        this.bleed = this.quietSorted[Math.floor(this.quietSorted.length * 0.85)]
+      }
+    }
+    // die eigene Stimme muss klar über der mitgehörten Musik liegen (Faktor 2 ≈ 6 dB)
+    const gate = Math.max(speaker ? 0.012 : 0.006, this.floor * (speaker ? 2.2 : 1.6), this.bleed * 2)
+    // Singstimmen liegen zwischen ~80 und 880 Hz; alles andere sind Störgeräusche oder Obertöne
+    let midi = r.hz >= 80 && r.hz <= 880 && r.rms > gate ? hzToMidi(r.hz) : 0
     // Einzelne Ausreißer-Frames unterdrücken: Ton muss zwei Frames in Folge halten
     if (midi && this.last && Math.abs(midi - this.last) < 1.5) this.stable++
     else this.stable = 0

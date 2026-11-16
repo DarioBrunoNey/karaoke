@@ -89,6 +89,9 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   const [liveAll, setLiveAll] = useState<Record<string, Live>>({})
   const sessions = useRef(new Map<string, ScoreSession>())
   const [showMode, setShowMode] = useState(false)
+  /** Hinweis: das Mikrofon hört die Musik mit */
+  const [bleed, setBleed] = useState(false)
+  const warned = useRef(false)
   const [multi, setMulti] = useState<{ pid: string; r: ScoreResult }[] | null>(null)
   const sections = useMemo(() => findSections(lines.map((l, i) => ({ t: l.t, e: pages[i].e, text: l.text }))), [lines, pages])
 
@@ -100,9 +103,9 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   }, [us, track.durationMs])
   const sessFor = useCallback((pid: string) => {
     let s = sessions.current.get(pid)
-    if (!s) { s = new ScoreSession({ fps: FPS, data: melodyData, source: 'stems' }); sessions.current.set(pid, s) }
+    if (!s) { s = new ScoreSession({ fps: FPS, data: melodyData, source: 'stems' }, 0, settings.difficulty); sessions.current.set(pid, s) }
     return s
-  }, [melodyData])
+  }, [melodyData, settings.difficulty])
   // Neue Wertung beginnen, sobald feststeht, womit verglichen wird
   useEffect(() => {
     sessions.current = new Map()
@@ -222,9 +225,13 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
       // Stimme je Sänger: sein Handy-Mikrofon, sonst das eingebaute Mikrofon dieses Geräts
       const singers = turnPids.current
       let local: ReturnType<typeof mic.sample> | null = null
+      // Soll gerade niemand singen (Intro, Zwischenspiel)? Dann misst das Mikrofon, wie laut die Musik bei ihm ankommt.
+      const fi = Math.max(0, Math.round(lt * FPS))
+      const silent = hasRef ? !s.refNear(fi, 30) : !pages.some((pg) => lt > pg.t - 0.5 && lt < pg.e + 0.6)
+      if (!warned.current && mic.bleed > 0.02 && pos > 8) { warned.current = true; setBleed(true) }
       singers.forEach((pid, k) => {
         const viaPhone = phoneSample(pid)
-        const smp = viaPhone ?? (p.current.micOn ? (local ??= mic.sample()) : null)
+        const smp = viaPhone ?? (p.current.micOn ? (local ??= mic.sample(silent)) : null)
         const sess = sessFor(pid)
         if (smp && !t.paused() && active) {
           // Handy: Funkstrecke braucht etwas länger als das eingebaute Mikrofon
@@ -530,6 +537,12 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
         </div>
       )}
 
+      {bleed && phase === 'ready' && (
+        <div className="rise fixed left-1/2 top-24 z-40 flex max-w-[92vw] -translate-x-1/2 items-center gap-3 rounded-2xl bg-yellow-300 px-4 py-3 text-sm font-semibold text-black shadow-2xl">
+          <span>Dein Mikrofon hört die Musik mit. Die App blendet sie aus – sing deutlich lauter als die Musik, oder nimm Kopfhörer bzw. ein Handy als Mikrofon. Sonst fallen die Punkte niedriger aus.</span>
+          <button className="shrink-0 cursor-pointer rounded-full bg-black/15 px-3 py-1" onClick={() => setBleed(false)}>OK</button>
+        </div>
+      )}
       {(phase === 'mic' || showMic) && <MicDialog current={micOn ? settings.micMode : 'off'} first={phase === 'mic'} onChoose={chooseMic} onClose={phase === 'mic' ? undefined : () => setShowMic(false)} />}
       {showMode && <ModeDialog profiles={profiles} current={turn.pids[0]} sections={sections} phones={phones.map((ph) => ph.pid)} onStart={startMode} onClose={() => setShowMode(false)} />}
       {showMelody && <MelodyDialog track={track} loaded={us} onApply={applyMelody} onClose={() => setShowMelody(false)} />}
