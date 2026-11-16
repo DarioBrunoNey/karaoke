@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { Icon, Modal, Stars, fmtTime } from '../ui'
 import { lineAt } from '../lib/lrc'
+import { paintCountdown, secondsToEntry } from '../lib/countdown'
 import { midiToName } from '../lib/pitch'
 import { ScoreSession, lineVerdict, type LiveState } from '../lib/scoring'
 import { estimateWords } from '../lib/words'
@@ -61,6 +62,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   const session = useRef<ScoreSession | null>(null)
   const fill = useRef<HTMLSpanElement>(null)
   const bar = useRef<HTMLDivElement>(null)
+  const cd = useRef<HTMLDivElement>(null)
   const clock = useRef<HTMLSpanElement>(null)
   const center = useRef(60)
   const liveRef = useRef<{ state: LiveState; midi: number; level: number }>({ state: 'none', midi: 0, level: 0 })
@@ -70,6 +72,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   // Mit Melodie-Datei sind die Silbenzeiten exakt; sonst werden die Wortzeiten aus den Zeilenzeiten geschätzt
   const lines: UsLine[] = useMemo(() => (us ? us.lines : estimateWords(lrc)), [us, lrc])
   const pages = useMemo(() => lines.map((l) => ({ t: l.t, e: l.syl[l.syl.length - 1]?.e ?? l.t + 3 })), [lines])
+  const pageEnds = useMemo(() => pages.map((x) => x.e), [pages])
   const [verdict, setVerdict] = useState<{ text: string; n: number } | null>(null)
   const hasRef = !!us
 
@@ -238,6 +241,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
         idx = i; setLineIdx(i)
       }
       if (fill.current && i >= 0) fill.current.style.setProperty('--p', `${syllableProgress(lines[i], lt) * 100}%`)
+      paintCountdown(cd.current, t.paused() ? 0 : secondsToEntry(pages, pageEnds, i, lt))
       if (bar.current) bar.current.style.width = `${(pos / Math.max(1, dur)) * 100}%`
       if (clock.current) clock.current.textContent = `${fmtTime(pos)} / ${fmtTime(dur)}`
       if (pos > 2) started = true
@@ -265,7 +269,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
     }
     raf = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(raf)
-  }, [phase, lines, hasRef, pages, sessFor])
+  }, [phase, lines, hasRef, pages, pageEnds, sessFor])
 
   const toggle = useCallback(() => { void tr.current?.toggle().catch(() => {}) }, [])
   const fullscreen = () => { if (document.fullscreenElement) void document.exitFullscreen(); else void document.documentElement.requestFullscreen?.().catch(() => {}) }
@@ -373,6 +377,11 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
         </div>
       )}
       <div className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center px-5 text-center sm:px-12">
+        {/* Countdown vor dem Einsatz nach einer Pause */}
+        <div ref={cd} data-testid="countdown" className="pointer-events-none absolute left-1/2 top-[6%] flex -translate-x-1/2 flex-col items-center opacity-0 transition-opacity duration-200">
+          <span className="grad-text text-[clamp(3rem,9vw,8rem)] font-black leading-none tabular-nums">3</span>
+          <div className="mt-2 h-1.5 w-40 overflow-hidden rounded-full bg-white/15"><div className="grad h-full rounded-full" /></div>
+        </div>
         {phase === 'loading' && <div><div className="grad mx-auto h-20 w-20 rounded-full [animation:pulse-ring_1.4s_infinite]" /><p className="mt-8 text-2xl font-bold">Spotify wird gestartet …</p></div>}
         {phase === 'error' && (
           <div className="glass max-w-xl p-8">

@@ -4,6 +4,7 @@ import { engine } from '../audio/engine'
 import { mic, type MicMode } from '../audio/mic'
 import { ScoreSession, lineVerdict, type LiveState } from '../lib/scoring'
 import { lineAt } from '../lib/lrc'
+import { paintCountdown, secondsToEntry } from '../lib/countdown'
 import { midiToName } from '../lib/pitch'
 import { drawLane as draw } from './pitchLane'
 import type { Melody } from '../lib/types'
@@ -36,6 +37,7 @@ export default function Player({ songId, profileId }: { songId: string; profileI
   const canvas = useRef<HTMLCanvasElement>(null)
   const fill = useRef<HTMLSpanElement>(null)
   const bar = useRef<HTMLDivElement>(null)
+  const cd = useRef<HTMLDivElement>(null)
   const clock = useRef<HTMLSpanElement>(null)
   const done = useRef(false)
   const started = useRef(false)
@@ -146,6 +148,7 @@ export default function Player({ songId, profileId }: { songId: string; profileI
         const a = lyrics[i].t, b = lineEnds[i]
         fill.current.style.setProperty('--p', `${Math.max(0, Math.min(1, (t - a) / Math.max(0.3, b - a))) * 100}%`)
       }
+      paintCountdown(cd.current, engine.playing ? secondsToEntry(lyrics, lineEnds, i, t) : 0)
       if (bar.current) bar.current.style.width = `${(t / Math.max(1, engine.duration)) * 100}%`
       if (clock.current) clock.current.textContent = `${fmtTime(t)} / ${fmtTime(engine.duration)}`
       draw(canvas.current, s, t, center, liveRef.current.midi ? liveRef.current.midi - p.pitch : 0, pages)
@@ -231,6 +234,11 @@ export default function Player({ songId, profileId }: { songId: string; profileI
 
       {/* Bühne: Liedtext */}
       <div className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center px-5 text-center sm:px-12">
+        {/* Countdown vor dem Einsatz nach einer Pause */}
+        <div ref={cd} data-testid="countdown" className="pointer-events-none absolute left-1/2 top-[6%] flex -translate-x-1/2 flex-col items-center opacity-0 transition-opacity duration-200">
+          <span className="grad-text text-[clamp(3rem,9vw,8rem)] font-black leading-none tabular-nums">3</span>
+          <div className="mt-2 h-1.5 w-40 overflow-hidden rounded-full bg-white/15"><div className="grad h-full rounded-full" /></div>
+        </div>
         {phase === 'loading' && (
           <div className="w-full max-w-md">
             <div className="grad mx-auto h-20 w-20 rounded-full [animation:pulse-ring_1.4s_infinite]" />
@@ -246,7 +254,7 @@ export default function Player({ songId, profileId }: { songId: string; profileI
           <div className="flex w-full max-w-[1600px] flex-col items-center gap-[2.2vh]">
             <p className="h-[1.3em] truncate text-[clamp(1rem,2.6vw,2.6rem)] font-semibold text-white/25">{lineIdx > 0 ? lyrics[lineIdx - 1].text : ''}</p>
             <p key={lineIdx} className="lyric-enter text-balance text-[clamp(2rem,6.2vw,6.5rem)] font-black leading-[1.08] tracking-tight drop-shadow-[0_4px_30px_rgba(0,0,0,.5)]">
-              {cur ? <span ref={fill} className="lyric-fill">{cur.text || '♪'}</span> : <Countdown at={firstIn} />}
+              {cur ? <span ref={fill} className="lyric-fill">{cur.text || '♪'}</span> : <span className="text-white/30">♪</span>}
             </p>
             <p className="text-balance text-[clamp(1.2rem,3.4vw,3.6rem)] font-bold leading-tight text-white/55">{lyrics[lineIdx + 1]?.text ?? ''}</p>
             <p className="hidden truncate text-[clamp(1rem,2.4vw,2.4rem)] font-semibold text-white/25 sm:block">{lyrics[lineIdx + 2]?.text ?? ''}</p>
