@@ -201,3 +201,12 @@ import { parseUltraStar, syllableProgress } from '../src/lib/ultrastar.ts'
   assert.equal(u.melody[Math.round(17.1 * 50)], 62); assert.equal(u.melody[Math.round(12.1 * 50)], 0)
   console.log('Sprungstellen OK')
 }
+{
+  const { fixEncoding, parseUltraStar } = await import('../src/lib/ultrastar.ts')
+  assert.equal(fixEncoding('f¸r dich w‰r ich schˆn, D¸se, groﬂ'), 'für dich wär ich schön, Düse, groß')
+  assert.equal(fixEncoding('Für Élise – schön'), 'Für Élise – schön', 'richtig gespeicherte Texte bleiben unverändert')
+  assert.equal(fixEncoding('È una bella canzone'), 'È una bella canzone', 'ohne eindeutige Anzeichen nichts ändern')
+  const u = parseUltraStar('#BPM:150\n#GAP:0\n: 0 4 0 f¸r \n: 5 4 2 dich\nE\n')
+  assert.equal(u.lines[0].text, 'für dich')
+  console.log('Umlaute OK')
+}

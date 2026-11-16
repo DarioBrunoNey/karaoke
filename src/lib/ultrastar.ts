@@ -6,7 +6,20 @@ export interface UsSong { title: string; artist: string; lines: UsLine[]; melody
 
 export const US_FPS = 50
 
-export function parseUltraStar(src: string): UsSong {
+// Viele ältere Karaoke-Dateien wurden mit der falschen Zeichentabelle gespeichert: aus „für" wurde „f¸r",
+// aus „wär" „w‰r". Erkennbar an Zeichen, die in Liedtexten sonst nie vorkommen – dann wird zurückübersetzt.
+const BROKEN: Record<string, string> = {
+  '‰': 'ä', 'ˆ': 'ö', '¸': 'ü', 'ƒ': 'Ä', '÷': 'Ö', '‹': 'Ü', 'ﬂ': 'ß',
+  'È': 'é', 'Ë': 'è', 'Í': 'ê', '‡': 'à', '·': 'á', '‚': 'â', 'Á': 'ç', 'Ò': 'ñ',
+  'Û': 'ó', 'Ú': 'ò', 'Ù': 'ô', 'Ì': 'í', 'Ó': 'î', '˙': 'ú', '˘': 'ù', '˚': 'û', 'Â': 'å', '¯': 'ø', 'Ê': 'æ',
+}
+export function fixEncoding(text: string): string {
+  if (!/[‰ˆ¸ƒ‹ﬂ‡˙˚˘¯]/.test(text) || /[äöüßÄÖÜ]/.test(text)) return text
+  return text.replace(/[‰ˆ¸ƒ÷‹ﬂÈËÍ‡·‚ÁÒÛÚÙÌÓ˙˘˚Â¯Ê]/g, (c) => BROKEN[c] ?? c)
+}
+
+export function parseUltraStar(raw: string): UsSong {
+  const src = fixEncoding(raw)
   const head: Record<string, string> = {}
   const rows = src.replace(/^﻿/, '').split(/\r?\n/)
   for (const r of rows) {
