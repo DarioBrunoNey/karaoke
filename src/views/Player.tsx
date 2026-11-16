@@ -352,7 +352,7 @@ function Countdown({ at }: { at: number }) {
   return <span className="grad-text">{'● '.repeat(Math.max(1, Math.ceil(left))).trim()}</span>
 }
 
-export function MicDialog({ current, first, onChoose, onClose }: { current: MicMode | 'off'; first: boolean; onChoose(m: MicMode | 'off'): void; onClose?: () => void }) {
+export function MicDialog({ current, first, onChoose, onClose, phone }: { current: MicMode | 'off'; first: boolean; onChoose(m: MicMode | 'off'): void; onClose?: () => void; /** Bereich „Handy als Mikrofon" mit QR-Code */ phone?: React.ReactNode }) {
   const Opt = ({ mode, icon, title, text, tag }: { mode: MicMode | 'off'; icon: string; title: string; text: string; tag?: string }) => (
     <button data-testid={`mic-${mode}`} onClick={() => onChoose(mode)} className={`flex w-full cursor-pointer items-center gap-4 rounded-2xl border p-4 text-left transition hover:bg-white/10 ${current === mode && !first ? 'border-white/50 bg-white/10' : 'border-white/10'}`}>
       <span className="grad flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl"><Icon name={icon} size={28} /></span>
@@ -361,7 +361,21 @@ export function MicDialog({ current, first, onChoose, onClose }: { current: MicM
   )
   return (
     <Modal onClose={onClose}>
-      <h2 className="text-3xl font-black tracking-tight">Wie hörst du die Musik?</h2>
+      {phone && (
+        <>
+          <div className="flex items-start gap-4">
+            <h2 className="flex-1 text-3xl font-black tracking-tight">Womit singst du?</h2>
+            {onClose && <button className="btn-icon" onClick={onClose} aria-label="Schließen"><Icon name="close" /></button>}
+          </div>
+          <div className="mt-4 rounded-2xl border border-emerald-300/40 bg-emerald-400/10 p-4">
+            <p className="mb-3 flex items-center gap-2 text-xl font-bold"><Icon name="mic" />Handy als Mikrofon <span className="rounded-full bg-emerald-400/20 px-2 py-0.5 text-xs text-emerald-300">empfohlen am Fernseher</span></p>
+            {phone}
+            <p className="mt-3 text-sm text-white/55">Sobald sich ein Handy verbindet, geht es von selbst weiter – auch mitten im Song.</p>
+          </div>
+          <p className="mb-1 mt-6 text-sm font-semibold uppercase tracking-widest text-white/45">Oder mit dem Mikrofon dieses Geräts</p>
+        </>
+      )}
+      <h2 className={`text-3xl font-black tracking-tight ${phone ? 'hidden' : ''}`}>Wie hörst du die Musik?</h2>
       <p className="mt-2 text-white/65">Für die Bewertung hört das eingebaute Mikrofon deines Geräts mit. Gleich fragt der Browser nach der Erlaubnis. Dein Gesang wird <b className="text-white">nur live auf diesem Gerät analysiert – nichts wird aufgenommen, gespeichert oder übertragen.</b></p>
       <div className="mt-5 space-y-3">
         <Opt mode="headphones" icon="headphones" title="Kopfhörer" tag="genaueste Bewertung" text="Musik auf den Ohren, das Mikrofon hört nur dich." />

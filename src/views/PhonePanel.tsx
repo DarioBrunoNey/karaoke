@@ -3,16 +3,16 @@ import { useStore } from '../store'
 import { Icon } from '../ui'
 
 /** QR-Code zum Verbinden der Handy-Mikrofone. `big` = Lobby-Darstellung, `compact` = im Dialog. */
-export default function PhonePanel({ compact, big }: { compact?: boolean; big?: boolean }) {
+export default function PhonePanel({ compact, big, auto }: { compact?: boolean; big?: boolean; /** Verbindung ohne Knopfdruck vorbereiten */ auto?: boolean }) {
   const { phoneHost, phones, startPhones, profiles } = useStore()
   const [qr, setQr] = useState('')
-  useEffect(() => { if (big) void startPhones() }, [big, startPhones])
+  useEffect(() => { if (big || auto) void startPhones() }, [big, auto, startPhones])
   useEffect(() => {
     if (!phoneHost.url) return
     void import('qrcode').then((Q) => Q.toDataURL(phoneHost.url, { margin: 1, width: 520, color: { dark: '#0b0714', light: '#ffffff' } })).then(setQr)
   }, [phoneHost.url])
 
-  if (phoneHost.state === 'error' || (phoneHost.state === 'off' && !big)) return (
+  if (phoneHost.state === 'error' || (phoneHost.state === 'off' && !big && !auto)) return (
     <div className={big ? 'text-center' : ''}>
       {!big && <p className="text-white/60">Jeder Sänger nutzt sein eigenes Handy als Funkmikrofon – für gleichzeitiges Singen und für den Fernseher. Übertragen wird nur die erkannte Tonhöhe, kein Ton.</p>}
       {phoneHost.error && <p className="mt-2 rounded-xl bg-red-500/15 p-3 text-red-200">Keine Verbindung zum Vermittlungsdienst ({phoneHost.error}). Bitte Internet prüfen.</p>}

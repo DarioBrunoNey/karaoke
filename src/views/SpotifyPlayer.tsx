@@ -101,6 +101,8 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   const [showMode, setShowMode] = useState(false)
   const [tries, setTries] = useState(0)
   const startRun = useRef(0)
+  /** true, sobald im Modus-Dialog von Hand gewählt wurde */
+  const manual = useRef(false)
   const [showSettings, setShowSettings] = useState(false)
   /** Hinweis: das Mikrofon hört die Musik mit */
   const [bleed, setBleed] = useState(false)
@@ -217,6 +219,23 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   // den Handys mitteilen, welcher Song läuft und wer gerade singt
   useEffect(() => { announceTurn(phase === 'ready' ? turn.pids : [], phase === 'ended' ? '' : track.name) }, [turn.pids, phase, track.name])
   useEffect(() => { resetPhoneGates(); return () => announceTurn([], '') }, [])
+  useEffect(() => {
+    if (manual.current || (phase !== 'ready' && phase !== 'mic' && phase !== 'loading')) return
+    const pids = phones.map((ph) => ph.pid).slice(0, 4)
+    const cur = turnPids.current
+    if (!pids.length || (pids.length === cur.length && pids.every((x) => cur.includes(x)))) return
+    const rounds: Round[] | null = pids.length > 1 ? [{ pids, s: 0, e: track.durationMs / 1000 + 5, label: '' }] : null
+    planRef.current = rounds; setPlan(rounds); ri.current = 0
+    turnPids.current = pids
+    session.current = sessFor(pids[0])
+    lives.current.clear(); centers.current = []
+    setTurn({ pids, label: '', next: '' })
+    setShowMic(false)
+    if (phase === 'mic') { setSettings({ micAsked: true }); setPhase('loading') }
+    const names = pids.map((x) => profiles.find((pr) => pr.id === x)?.name).filter(Boolean).join(' und ')
+    say(pids.length > 1 ? `${names} singen gemeinsam` : `${names} singt mit dem Handy`)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phones, phase])
   const finishRef = useRef(finish)
   finishRef.current = finish
 
@@ -344,6 +363,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
   }
   /** Startet einen Ablauf: wer singt, welcher Teil, gleichzeitig / abwechselnd / als Duell */
   const startMode = (pids: string[], part: Section | null, style: 'simul' | 'pass' | 'duel') => {
+    manual.current = true // ab jetzt gilt die Wahl aus dem Modus-Dialog, nicht mehr die Automatik
     const t = tr.current
     if (!t || !pids.length) return
     let rounds: Round[] | null = null
@@ -420,9 +440,10 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
           <p className="truncate text-white/60 sm:text-lg">{track.artists}</p>
         </div>
         <div className="flex shrink-0 items-center gap-3">
-          <div className="hidden items-center gap-2 rounded-full bg-white/10 py-1.5 pl-1.5 pr-4 font-semibold sm:flex">
-            <span className="flex h-9 w-9 items-center justify-center rounded-full font-black text-black" style={{ background: singer?.color }}>{singer?.name.slice(0, 1).toUpperCase()}</span>{singer?.name}
-          </div>
+          <button className="hidden cursor-pointer items-center gap-2 rounded-full bg-white/10 py-1.5 pl-1.5 pr-4 font-semibold hover:bg-white/20 sm:flex" onClick={() => setShowMode(true)} title="Sänger und Spielmodus wählen">
+            <span className="flex h-9 w-9 items-center justify-center rounded-full font-black text-black" style={{ background: singer?.color }}>{singer?.name.slice(0, 1).toUpperCase()}</span>{together ? `${turn.pids.length} Sänger` : singer?.name}
+            {turn.pids.some((pid) => phones.some((ph) => ph.pid === pid)) && <Icon name="mic" size={16} className="text-emerald-300" />}
+          </button>
           {voiceOn && phase === 'ready' && !together && (
             <div className="text-right">
               <p data-testid="live-score" className="grad-text text-4xl font-black tabular-nums leading-none sm:text-5xl">{live.score}</p>
@@ -552,7 +573,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
             return (
               <div key={pid} data-testid={`lane-${who?.name}`} className="relative overflow-hidden rounded-3xl border bg-black/30" style={{ height: `${Math.max(11, 22 / Math.min(2, turn.pids.length) + (turn.pids.length > 2 ? -3 : 0))}vh`, minHeight: together ? 76 : 112, borderColor: together ? who?.color : 'rgba(255,255,255,.1)' }}>
                 <canvas ref={(el) => { canvases.current[k] = el }} className="h-full w-full" />
-                {!voiceOn && <button data-testid="mic-on" className="absolute left-3 top-2.5 z-10 flex cursor-pointer items-center gap-2 rounded-full bg-yellow-300 px-4 py-1.5 text-sm font-bold text-black shadow-lg hover:brightness-105" onClick={() => setShowMic(true)}><Icon name="micOff" size={16} />Mikrofon ist aus – einschalten</button>}
+                {!voiceOn && <button data-testid="mic-on" className="absolute left-3 top-2.5 z-10 flex cursor-pointer items-center gap-2 rounded-full bg-yellow-300 px-4 py-1.5 text-sm font-bold text-black shadow-lg hover:brightness-105" onClick={() => setShowMic(true)}><Icon name="micOff" size={16} />Mikrofon wählen: Handy oder dieses Gerät</button>}
                 <div className={`pointer-events-none absolute left-4 top-2.5 flex items-center gap-3 ${voiceOn ? '' : 'hidden'}`}>
                   {together && <span className="rounded-full px-3 py-0.5 text-sm font-black text-black" style={{ background: who?.color }}>{who?.name}</span>}
                   <span data-testid={k === 0 ? 'live-state' : undefined} className={`font-black ${together ? 'text-lg' : 'text-xl sm:text-2xl'} ${color}`}>{label}</span>
@@ -637,7 +658,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
         </div>
       )}
       {hideUi && <button aria-label="Bedienung einblenden" className="fixed inset-0 z-30 cursor-none" onClick={() => setIdle(false)} />}
-      {(phase === 'mic' || showMic) && <MicDialog current={micOn ? settings.micMode : 'off'} first={phase === 'mic'} onChoose={chooseMic} onClose={phase === 'mic' ? undefined : () => setShowMic(false)} />}
+      {(phase === 'mic' || showMic) && <MicDialog current={micOn ? settings.micMode : 'off'} first={phase === 'mic'} onChoose={chooseMic} onClose={phase === 'mic' ? undefined : () => setShowMic(false)} phone={<PhonePanel compact auto />} />}
       {showMode && <ModeDialog profiles={profiles} current={turn.pids[0]} sections={sections} phones={phones.map((ph) => ph.pid)} onStart={startMode} onClose={() => setShowMode(false)} />}
       {showMelody && <MelodyDialog track={track} loaded={us} onApply={applyMelody} onClose={() => setShowMelody(false)} />}
     </div>

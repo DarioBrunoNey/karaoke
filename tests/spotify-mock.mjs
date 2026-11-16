@@ -17,7 +17,7 @@ async function run(mode, shot) {
   await page.addInitScript(({ mode, US, NOTES }) => {
     localStorage.setItem('encore-settings', JSON.stringify({ spotifyClientId: 'x'.repeat(32), micAsked: true, micMode: 'headphones' }))
     localStorage.setItem('encore-spotify-token', JSON.stringify({ access: 'tok', refresh: 'ref', exp: Date.now() + 3.6e6, clientId: 'x'.repeat(32) }))
-    if (['melodie', 'falsch', 'duell', 'handys', 'mithoeren', 'lobby', 'zaeh'].includes(mode)) localStorage.setItem('encore-us4-t1', US)
+    if (['melodie', 'falsch', 'duell', 'handys', 'mithoeren', 'lobby', 'zaeh', 'spaeter'].includes(mode)) localStorage.setItem('encore-us4-t1', US)
     navigator.mediaDevices.getUserMedia = async (c) => {
       const aec = !!c?.audio?.echoCancellation
       window.__aec = aec
@@ -76,7 +76,7 @@ async function run(mode, shot) {
       async setVolume() {} pause() { this.paused = true } disconnect() { clearInterval(this.iv) }
     } }
     window.onSpotifyWebPlaybackSDKReady()` }))
-  await page.goto(URL + (mode === 'handys' || mode === 'lobby' ? '?bc' : ''))
+  await page.goto(URL + (['handys', 'lobby', 'spaeter'].includes(mode) ? '?bc' : ''))
   if (mode === 'duell') {
     await page.getByRole('button', { name: 'Karaoke-Abend' }).first().click()
     await page.getByText('Jemand ohne Handy?').click()
@@ -209,6 +209,30 @@ async function run(mode, shot) {
     await ctx.close()
     return out
   }
+  if (mode === 'spaeter') {
+    // Song läuft schon; über „Mikrofon" den QR-Code holen, ein Handy verbindet sich – dessen Besitzer singt sofort weiter
+    await page.mouse.move(700, 300)
+    await page.getByTestId('settings').click()
+    await page.getByRole('button', { name: 'Ändern' }).last().click().catch(() => {})
+    let url = await page.getByTestId('phone-url').textContent({ timeout: 3000 }).catch(() => '')
+    if (!url) { await page.getByText('Mikrofon').first().click().catch(() => {}); url = await page.getByTestId('phone-url').textContent({ timeout: 3000 }) }
+    await page.waitForTimeout(700)
+    await page.screenshot({ path: 'tests/shots/m1-mikrofon-dialog.png' })
+    const ph = await ctx.newPage()
+    await ph.addInitScript(() => {
+      localStorage.removeItem('encore-phone-name')
+      navigator.mediaDevices.getUserMedia = async () => { const ac = new AudioContext(); const o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 261.63; const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1500; const g = ac.createGain(); g.gain.value = 0.3; const d = ac.createMediaStreamDestination(); o.connect(lp).connect(g).connect(d); o.start(); return d.stream }
+    })
+    await ph.goto(url)
+    await ph.getByPlaceholder('Dein Name').fill('Cara')
+    await ph.getByTestId('phone-start').click()
+    const lane = await page.getByTestId('lane-Cara').waitFor({ timeout: 8000 }).then(() => 'ok').catch(() => 'keine Bahn für Cara')
+    const dialogGone = (await page.getByTestId('phone-url').count()) === 0
+    const says = await ph.waitForFunction(() => document.querySelector('[data-testid=phone-state]')?.textContent === 'Du singst!', null, { timeout: 6000 }).then(() => 'ok').catch(() => 'Handy weiß nichts')
+    const out = { mode, total: 0, pitch: 0, state: lane, note: dialogGone ? says : 'Dialog blieb offen', errors, played: true }
+    await ctx.close()
+    return out
+  }
   const want = mode === 'frei' ? 'Stimme erkannt' : mode === 'falsch' ? 'Zu hoch' : mode === 'mithoeren' ? 'Sing!' : 'Treffer'
   const state = await page.waitForFunction((w) => document.querySelector('[data-testid=live-state]')?.textContent === w, want, { timeout: 9000 }).then(() => want).catch(() => 'nie: ' + want)
   const note = await page.getByTestId('live-note').textContent({ timeout: 500 }).catch(() => '')
@@ -231,7 +255,7 @@ async function run(mode, shot) {
   return res
 }
 
-const results = await Promise.all([run('frei', 's3'), run('melodie', 's4'), run('falsch'), run('auto', 's5'), run('duell'), run('handys'), run('mithoeren'), run('lobby'), run('zaeh')])
+const results = await Promise.all([run('frei', 's3'), run('melodie', 's4'), run('falsch'), run('auto', 's5'), run('duell'), run('handys'), run('mithoeren'), run('lobby'), run('zaeh'), run('spaeter')])
 console.table(results.map(({ errors, ...r }) => r))
 const by = Object.fromEntries(results.map((r) => [r.mode, r]))
 const checks = [
@@ -247,6 +271,7 @@ const checks = [
   ['Zweiter Song direkt danach startet ohne neue Anmeldung', by.melodie.again === 'ok'],
   ['Lobby: zwei Handys scannen, Song wählen – beide singen automatisch gleichzeitig, Handy zeigt „Du singst!"', by.lobby.state === 'Du singst!' && by.lobby.note === 'ok' && by.lobby.total > 0],
   ['Spotify kennt das Gerät erst nicht: App meldet den Player neu an und startet trotzdem', by.zaeh.total >= 80 && by.zaeh.reconnects >= 2],
+  ['Handy verbindet sich mitten im Song über den Mikrofon-Dialog: sein Besitzer singt sofort weiter', by.spaeter.state === 'ok' && by.spaeter.note === 'ok'],
   ['keine Browser-Fehler', results.every((r) => r.errors.length === 0)],
 ]
 for (const [n, ok] of checks) console.log(ok ? '✓' : '✗', n)
