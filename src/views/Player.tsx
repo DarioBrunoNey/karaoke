@@ -8,7 +8,7 @@ import { paintCountdown, secondsToEntry } from '../lib/countdown'
 import { midiToName } from '../lib/pitch'
 import { drawLane as draw } from './pitchLane'
 import type { Melody } from '../lib/types'
-import { Cover, Icon, Modal, fmtTime, useBlobUrl } from '../ui'
+import { Cover, Icon, IS_TV, Modal, fmtTime, useBlobUrl } from '../ui'
 
 type Phase = 'mic' | 'loading' | 'ready' | 'error'
 const LIVE_LABEL: Record<LiveState, string> = { none: '', silent: 'Sing!', hit: 'Treffer', high: 'Zu hoch', low: 'Zu tief' }
@@ -200,7 +200,7 @@ export default function Player({ songId, profileId }: { songId: string; profileI
     if (phase === 'mic') setPhase('loading')
     else void startMic(mode)
   }
-  const hideUi = idle && playing && !showMic
+  const hideUi = !IS_TV && idle && playing && !showMic
   const cur = lineIdx >= 0 ? lyrics[lineIdx] : null
   const firstIn = lyrics.length && lineIdx < 0 ? lyrics[0].t : 0
 
@@ -317,6 +317,7 @@ export default function Player({ songId, profileId }: { songId: string; profileI
         </div>
       </div>
 
+      {hideUi && <button aria-label="Bedienung einblenden" className="fixed inset-0 z-30 cursor-none" onClick={() => setIdle(false)} />}
       {(phase === 'mic' || showMic) && <MicDialog current={micOn ? settings.micMode : 'off'} first={phase === 'mic'} onChoose={chooseMic} onClose={phase === 'mic' ? undefined : () => setShowMic(false)} />}
     </div>
   )

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
-import { Icon, Modal, Stars, fmtTime } from '../ui'
+import { Icon, IS_TV, Modal, Stars, fmtTime } from '../ui'
 import { lineAt } from '../lib/lrc'
 import { paintCountdown, secondsToEntry } from '../lib/countdown'
 import { midiToName } from '../lib/pitch'
@@ -340,7 +340,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
     return () => { clearTimeout(timer); for (const ev of evs) window.removeEventListener(ev, wake) }
   }, [])
 
-  const hideUi = idle && phase === 'ready' && !paused && !showMic && !showMelody && !showMode
+  const hideUi = !IS_TV && idle && phase === 'ready' && !paused && !showMic && !showMelody && !showMode
   const singer = profiles.find((x) => x.id === turn.pids[0]) ?? profile
   const voiceOn = micOn || turn.pids.some((pid) => phones.some((ph) => ph.pid === pid))
   const upNext = turn.next ? profiles.find((x) => x.id === turn.next) : undefined
@@ -545,6 +545,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
           <button className="shrink-0 cursor-pointer rounded-full bg-black/15 px-3 py-1" onClick={() => setBleed(false)}>OK</button>
         </div>
       )}
+      {hideUi && <button aria-label="Bedienung einblenden" className="fixed inset-0 z-30 cursor-none" onClick={() => setIdle(false)} />}
       {(phase === 'mic' || showMic) && <MicDialog current={micOn ? settings.micMode : 'off'} first={phase === 'mic'} onChoose={chooseMic} onClose={phase === 'mic' ? undefined : () => setShowMic(false)} />}
       {showMode && <ModeDialog profiles={profiles} current={turn.pids[0]} sections={sections} phones={phones.map((ph) => ph.pid)} onStart={startMode} onClose={() => setShowMode(false)} />}
       {showMelody && <MelodyDialog track={track} loaded={us} onApply={applyMelody} onClose={() => setShowMelody(false)} />}

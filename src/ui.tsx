@@ -80,4 +80,7 @@ export function Modal({ children, onClose, wide }: { children: ReactNode; onClos
   )
 }
 
+/** Fernseher-Browser (Samsung, LG, Android TV …): dort bleibt die Bedienung immer sichtbar */
+export const IS_TV = /Tizen|SMART-TV|SmartTV|Web0S|WebOS|NetCast|BRAVIA|Android TV|GoogleTV|AFT[A-Z]|HbbTV|\bTV\b/i.test(navigator.userAgent)
+
 export const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
