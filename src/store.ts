@@ -3,7 +3,7 @@ import { Db, uid } from './lib/db'
 import { buildDemoSong } from './lib/demo'
 import { importAudioFile, isAudioFile } from './lib/importSong'
 import type { Profile, QueueItem, ScoreEntry, ScoreResult, Song, SpTrack } from './lib/types'
-import { finishLogin } from './spotify/api'
+import { activateSpotify, finishLogin } from './spotify/api'
 import type { MicMode } from './audio/mic'
 import type { Difficulty } from './lib/scoring'
 import { engine } from './audio/engine'
@@ -191,6 +191,7 @@ export const useStore = create<State>((set, get) => ({
   },
   playSpotify(track, profileId, qid) {
     void engine.init().catch(() => {}) // für das Mikrofon: AudioContext im Klick entsperren
+    activateSpotify()
     const pid = profileId ?? get().activeProfileId
     if (qid) set({ queue: get().queue.filter((q) => q.qid !== qid) })
     set({ view: { name: 'spotify', track, profileId: pid, run: Date.now() } })

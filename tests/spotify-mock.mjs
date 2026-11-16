@@ -45,6 +45,8 @@ async function run(mode, shot) {
   await ctx.route('https://api.spotify.com/**', (route) => {
     const u = route.request().url(); calls.push(route.request().method() + ' ' + u.replace('https://api.spotify.com/v1', ''))
     if (u.includes('/search')) return route.fulfill({ json: { tracks: { items: [track] } } })
+    // wie beim echten Spotify beginnt die Wiedergabe erst mit dem Abspiel-Befehl – auf dem bereits angemeldeten Gerät
+    if (u.includes('/me/player/play')) page.evaluate(() => window.__spStart?.()).catch(() => {})
     return route.fulfill({ status: 204, body: '' })
   })
   // Noten-Sammlung: enthält den Song nur im Modus „auto" – dort um 1,5 s verschoben (wie bei einem Musikvideo mit Vorspann)
@@ -60,7 +62,8 @@ async function run(mode, shot) {
       addListener(n, f) { this.l[n] = f }
       emit() { this.l.player_state_changed?.({ position: this.now(), paused: this.paused, duration: 14000 }) }
       now() { return this.paused ? this.pos : Math.min(14000, this.pos + performance.now() - this.t) }
-      async connect() { setTimeout(() => { this.l.ready({ device_id: 'dev1' }); this.pos = 0; this.paused = false; this.t = performance.now(); this.emit()
+      async connect() { window.__spConnects = (window.__spConnects || 0) + 1; setTimeout(() => { this.l.ready({ device_id: 'dev1' })
+        window.__spStart = () => { this.pos = 0; this.paused = false; this.t = performance.now(); this.emit() }
         this.iv = setInterval(() => { if (!this.paused && this.now() >= 14000) { this.pos = 0; this.paused = true; this.emit() } }, 100) }, 200); return true }
       async getCurrentState() { return { position: this.now(), paused: this.paused, duration: 14000 } }
       async togglePlay() { this.pos = this.now(); this.paused = !this.paused; this.t = performance.now(); this.emit() }
@@ -154,7 +157,13 @@ async function run(mode, shot) {
   await page.waitForTimeout(700)
   if (shot) await page.screenshot({ path: `tests/shots/${shot}-auswertung.png` })
   const num = async (id) => +(await page.getByTestId(id).textContent()).replace(/\D.*$/, '')
-  const res = { mode, total: await num('total'), pitch: await num('part-pitch'), rhythm: await num('part-rhythm'), timing: await num('part-timing'), continuity: await num('part-continuity'), state, note, errors, played: calls.some((c) => c.startsWith('PUT /me/player/play?device_id=dev1')) }
+  const res = { mode, total: await num('total'), pitch: await num('part-pitch'), rhythm: await num('part-rhythm'), timing: await num('part-timing'), continuity: await num('part-continuity'), state, note, again: '', errors, played: calls.some((c) => c.startsWith('PUT /me/player/play?device_id=dev1')) }
+  if (mode === 'melodie') {
+    // zweiter Song in derselben Sitzung: der Spotify-Player wird wiederverwendet, nicht neu angemeldet
+    await page.getByRole('button', { name: 'Nochmal' }).click()
+    res.again = await page.waitForFunction(() => document.querySelector('[data-testid=live-state]')?.textContent === 'Treffer', null, { timeout: 12000 }).then(() => 'ok').catch(() => 'kein zweiter Start')
+    if ((await page.evaluate(() => window.__spConnects)) !== 1) res.again = 'Player wurde neu angemeldet'
+  }
   await ctx.close()
   return res
 }
@@ -171,6 +180,7 @@ const checks = [
   ['Duell über eine Strophe: richtiger Sänger gewinnt (≥ 80), der schiefe verliert (≤ 50)', by.duell.total >= 80 && by.duell.pitch <= 50 && by.duell.state.endsWith('Sänger 1')],
   ['Zwei Handy-Mikrofone gleichzeitig: beide Stimmen kommen getrennt an (C4 / E4), beide bekommen Punkte', by.handys.state === 'Anna singt C4, Ben singt E4' && by.handys.total > 0 && by.handys.pitch > 0 && by.handys.note === 'ok'],
   ['Niemand singt, Mikrofon hört nur den Originalsänger aus dem Lautsprecher: keine Punkte (≤ 10)', by.mithoeren.total <= 10],
+  ['Zweiter Song direkt danach startet ohne neue Anmeldung', by.melodie.again === 'ok'],
   ['keine Browser-Fehler', results.every((r) => r.errors.length === 0)],
 ]
 for (const [n, ok] of checks) console.log(ok ? '✓' : '✗', n)

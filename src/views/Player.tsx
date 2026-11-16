@@ -135,7 +135,7 @@ export default function Player({ songId, profileId }: { songId: string; profileI
       const s = session.current!
       if (p.micOn && engine.playing) {
         // in Pausen der Melodie misst das Mikrofon, wie laut die Musik bei ihm ankommt
-        const smp = mic.sample(!s.refNear(Math.max(0, Math.round(t * s.fps)), 30))
+        const smp = mic.sample(!s.refNear(Math.max(0, Math.round(t * s.fps)), 18))
         const st = s.add(t - p.offset * p.tempo, smp.voiced ? smp.midi - p.pitch : 0)
         liveRef.current = { state: st, midi: smp.voiced ? smp.midi : 0, level: smp.level }
       }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { Icon, fmtTime } from '../ui'
-import { disconnect, isConnected, playlistId, playlistTracks, searchTracks, startLogin } from '../spotify/api'
+import { disconnect, isConnected, playlistId, playlistTracks, searchTracks, startLogin, warmUpSpotify } from '../spotify/api'
 import type { SpTrack } from '../lib/types'
 
 export default function SpotifySearch() {
@@ -28,6 +28,8 @@ export default function SpotifySearch() {
     }, 350)
     return () => { stale = true; clearTimeout(id) }
   }, [q, connected])
+
+  useEffect(() => { if (connected) warmUpSpotify(settings.volume) }, [connected, settings.volume])
 
   if (!settings.spotifyClientId) return (
     <Box title="Spotify einmalig einrichten" text="Für den Mitsing-Modus braucht die App eine eigene, kostenlose Spotify-Entwickler-Kennung (Client-ID). Das dauert etwa fünf Minuten – die Schritte stehen unter „Hilfe & Musikquellen“.">

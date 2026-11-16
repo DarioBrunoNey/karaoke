@@ -76,7 +76,7 @@ export class Mic {
     if (expectSilence) {
       this.quiet.push(r.rms)
       if (this.quiet.length > 400) this.quiet.shift()
-      if (this.quiet.length >= 40 && this.quiet.length % 10 === 0) {
+      if (this.quiet.length >= 12 && this.quiet.length % 4 === 0) {
         this.quietSorted = [...this.quiet].sort((a, b) => a - b)
         this.bleed = this.quietSorted[Math.floor(this.quietSorted.length * 0.85)]
       }

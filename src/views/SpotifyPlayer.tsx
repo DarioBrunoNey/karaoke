@@ -125,7 +125,9 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
     setPhase('loading'); setError('')
     tr.current?.destroy(); tr.current = null
     try {
-      const t = mode === 'browser' ? await browserTransport(track, settings.volume) : await remoteTransport(track)
+      // ein zweiter Anlauf fängt kurze Aussetzer bei Spotify ab, bevor eine Fehlermeldung erscheint
+      const open = () => (mode === 'browser' ? browserTransport(track, settings.volume) : remoteTransport(track))
+      const t = await open().catch((e) => ((e as { status?: number }).status === 403 ? Promise.reject(e) : new Promise((r) => setTimeout(r, 1200)).then(open)))
       tr.current = t
       setDevice(t.deviceName)
       setPhase('ready')
@@ -227,7 +229,7 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
       let local: ReturnType<typeof mic.sample> | null = null
       // Soll gerade niemand singen (Intro, Zwischenspiel)? Dann misst das Mikrofon, wie laut die Musik bei ihm ankommt.
       const fi = Math.max(0, Math.round(lt * FPS))
-      const silent = hasRef ? !s.refNear(fi, 30) : !pages.some((pg) => lt > pg.t - 0.5 && lt < pg.e + 0.6)
+      const silent = hasRef ? !s.refNear(fi, 18) : !pages.some((pg) => lt > pg.t - 0.5 && lt < pg.e + 0.6)
       if (!warned.current && mic.bleed > 0.02 && pos > 8) { warned.current = true; setBleed(true) }
       singers.forEach((pid, k) => {
         const viaPhone = phoneSample(pid)

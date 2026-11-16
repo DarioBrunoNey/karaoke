@@ -212,53 +212,107 @@ function loadSdk(): Promise<any> {
   })
 }
 
+// Ein einziger Spotify-Player je App-Sitzung. Früher wurde für jeden Song ein neuer angemeldet und danach wieder
+// abgemeldet – Spotify kennt ein frisch angemeldetes Gerät aber oft erst nach Sekunden („Device not found"),
+// und schnelles An-/Abmelden führt zu sporadischen Fehlern. Jetzt bleibt das Gerät angemeldet.
+interface Shared { player: any; deviceId: string; online: boolean; onState: ((s: any) => void) | null; waiters: (() => void)[] }
+let shared: Promise<Shared> | null = null
+let livePlayer: any = null
+
+function ensurePlayer(volume: number): Promise<Shared> {
+  if (shared) return shared
+  const p = (async () => {
+    const Spotify = await loadSdk()
+    const player = new Spotify.Player({ name: 'Encore Karaoke', volume, getOAuthToken: (cb: (t: string) => void) => { accessToken().then(cb).catch(() => cb('')) } })
+    const sh: Shared = { player, deviceId: '', online: false, onState: null, waiters: [] }
+    player.addListener('player_state_changed', (st: any) => sh.onState?.(st))
+    player.addListener('not_ready', () => { sh.online = false })
+    await new Promise<void>((resolve, reject) => {
+      // „ready" kommt auch nach einer Verbindungsunterbrechung erneut – dann ggf. mit neuer Geräte-ID
+      player.addListener('ready', (e: any) => { sh.deviceId = e.device_id; sh.online = true; resolve(); sh.waiters.splice(0).forEach((w) => w()) })
+      for (const ev of ['initialization_error', 'authentication_error', 'account_error']) player.addListener(ev, (e: any) => reject(new Error(e.message)))
+      player.connect().then((ok: boolean) => { if (!ok) reject(new Error('Verbindung zu Spotify fehlgeschlagen')) })
+      setTimeout(() => reject(new Error('Spotify-Player wurde nicht bereit')), 20000)
+    })
+    livePlayer = player
+    return sh
+  })()
+  shared = p
+  p.catch(() => { if (shared === p) shared = null })
+  return p
+}
+
+function dropPlayer() {
+  try { livePlayer?.disconnect() } catch { /* schon getrennt */ }
+  livePlayer = null; shared = null
+}
+
+/** Player schon beim Öffnen der Spotify-Suche anmelden – beim ersten Song ist das Gerät dann längst bekannt. */
+export function warmUpSpotify(volume = 0.9) { if (isConnected()) void ensurePlayer(volume).catch(() => {}) }
+/** Direkt im Klick aufrufen: erlaubt dem Browser (v. a. am Handy und Fernseher), Ton ohne weiteren Tipp zu starten. */
+export function activateSpotify() { try { void livePlayer?.activateElement?.() } catch { /* nicht nötig */ } }
+
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
 /** Wiedergabe direkt in diesem Browser (Web Playback SDK, nur Premium). */
 export async function browserTransport(track: SpTrack, volume: number): Promise<Transport> {
-  const Spotify = await loadSdk()
-  const player = new Spotify.Player({ name: 'Encore Karaoke', volume, getOAuthToken: (cb: (t: string) => void) => { accessToken().then(cb).catch(() => cb('')) } })
+  let sh = await ensurePlayer(volume)
   let pos = 0, at = performance.now(), paused = true, dur = track.durationMs
-  player.addListener('player_state_changed', (s: any) => {
-    if (!s) return
-    pos = s.position; at = performance.now(); paused = s.paused
-    if (s.duration) dur = s.duration
-  })
+  const started = performance.now()
+  let seen = false
+  const take = (st: any, lag = 0) => {
+    if (!st) return
+    // Meldungen des vorherigen Songs ignorieren, bis der neue wirklich läuft (spätestens nach 4 s alles annehmen)
+    const cur = st.track_window?.current_track
+    const mine = !cur || cur.id === track.id || cur?.linked_from?.id === track.id || cur?.uri === track.uri
+    if (!mine && !seen && performance.now() - started < 4000) return
+    seen = true
+    pos = st.position + lag; at = performance.now(); paused = st.paused
+    if (st.duration) dur = st.duration
+  }
+  const attach = () => { sh.onState = (st) => take(st); void sh.player.setVolume(volume).catch(() => {}) }
+  attach()
+  try { await sh.player.activateElement?.() } catch { /* nur auf Mobilgeräten nötig */ }
+
+  let lastErr: unknown
+  for (let i = 0; i < 12; i++) {
+    try {
+      if (!sh.online) {
+        // Gerät kurzzeitig abgemeldet: auf die Wiederanmeldung warten, sonst neu verbinden
+        await Promise.race([new Promise<void>((r) => sh.waiters.push(r)), wait(4000)])
+        if (!sh.online) await sh.player.connect().catch(() => {})
+      }
+      await playOn(track.uri, sh.deviceId)
+      lastErr = undefined
+      break
+    } catch (e) {
+      lastErr = e
+      const status = (e as { status?: number }).status
+      if (status === 401 || status === 403) break // Anmeldung/Premium – Wiederholen hilft nicht
+      await wait(500 + i * 250)
+      if (i % 3 === 1) await api('/me/player', { method: 'PUT', body: JSON.stringify({ device_ids: [sh.deviceId], play: false }) }).catch(() => {})
+      // hartnäckig: Player komplett neu anmelden und mit frischer Geräte-ID weitermachen
+      if (i === 6) { dropPlayer(); sh = await ensurePlayer(volume); attach() }
+    }
+  }
+  if (lastErr) { sh.onState = null; throw lastErr }
+
   // Statusmeldungen kommen nur bei Änderungen. Damit Puffern/Nachladen den Text nicht verschiebt,
   // wird die echte Position zusätzlich zweimal pro Sekunde abgefragt.
   const sync = setInterval(() => {
     const t0 = performance.now()
-    player.getCurrentState().then((s: any) => {
-      if (!s) return
-      const t1 = performance.now()
-      pos = s.position + (t1 - t0) / 2; at = t1; paused = s.paused
-      if (s.duration) dur = s.duration
-    }).catch(() => {})
+    sh.player.getCurrentState().then((st: any) => take(st, (performance.now() - t0) / 2)).catch(() => {})
   }, 500)
-  const deviceId = await new Promise<string>((resolve, reject) => {
-    player.addListener('ready', (e: any) => resolve(e.device_id))
-    for (const ev of ['initialization_error', 'authentication_error', 'account_error']) player.addListener(ev, (e: any) => reject(new Error(e.message)))
-    player.connect().then((ok: boolean) => { if (!ok) reject(new Error('Verbindung zu Spotify fehlgeschlagen')) })
-    setTimeout(() => reject(new Error('Spotify-Player wurde nicht bereit')), 15000)
-  })
-  try { await player.activateElement?.() } catch { /* nur auf Mobilgeräten nötig */ }
-  // Das neue Gerät ist bei Spotify manchmal erst nach einem Moment bekannt
-  // (auf Handys teils mehrere Sekunden) – deshalb geduldig wiederholen und das Gerät zwischendurch aktiv anmelden
-  for (let i = 0; ; i++) {
-    try { await playOn(track.uri, deviceId); break }
-    catch (e) {
-      if (i >= 9) { clearInterval(sync); player.disconnect(); throw e }
-      await new Promise((r) => setTimeout(r, 600 + i * 250))
-      if (i % 3 === 1) await api('/me/player', { method: 'PUT', body: JSON.stringify({ device_ids: [deviceId], play: false }) }).catch(() => {})
-    }
-  }
   return {
     kind: 'browser', deviceName: 'dieses Gerät',
     time: () => Math.min(dur, paused ? pos : pos + (performance.now() - at)) / 1000,
     duration: () => dur / 1000,
     paused: () => paused,
-    toggle: () => player.togglePlay(),
-    seek: async (s) => { pos = s * 1000; at = performance.now(); await player.seek(s * 1000) },
-    setVolume: (v) => void player.setVolume(v),
-    destroy: () => { clearInterval(sync); try { player.pause(); player.disconnect() } catch { /* schon getrennt */ } },
+    toggle: () => sh.player.togglePlay(),
+    seek: async (sec) => { pos = sec * 1000; at = performance.now(); await sh.player.seek(sec * 1000) },
+    setVolume: (v) => void sh.player.setVolume(v),
+    // Player bleibt angemeldet – nur anhalten
+    destroy: () => { clearInterval(sync); if (sh.onState) sh.onState = null; try { void sh.player.pause() } catch { /* egal */ } },
   }
 }
 
