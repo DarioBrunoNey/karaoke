@@ -521,7 +521,8 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
       </div>
 
       {/* Stimme: je Sänger eine Notenbahn */}
-      {phase === 'ready' && voiceOn && (
+      {/* Die Notenbahn bleibt auch ohne Mikrofon sichtbar – dann mit einem Knopf zum Einschalten */}
+      {phase === 'ready' && (voiceOn || hasRef) && (
         <div className="relative z-10 mx-auto flex w-full max-w-[1600px] flex-col gap-2 px-4 sm:px-8">
           {turn.pids.map((pid, k) => {
             const who = profiles.find((x) => x.id === pid)
@@ -531,7 +532,8 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
             return (
               <div key={pid} data-testid={`lane-${who?.name}`} className="relative overflow-hidden rounded-3xl border bg-black/30" style={{ height: `${Math.max(11, 22 / Math.min(2, turn.pids.length) + (turn.pids.length > 2 ? -3 : 0))}vh`, minHeight: together ? 76 : 112, borderColor: together ? who?.color : 'rgba(255,255,255,.1)' }}>
                 <canvas ref={(el) => { canvases.current[k] = el }} className="h-full w-full" />
-                <div className="pointer-events-none absolute left-4 top-2.5 flex items-center gap-3">
+                {!voiceOn && <button data-testid="mic-on" className="absolute left-3 top-2.5 z-10 flex cursor-pointer items-center gap-2 rounded-full bg-yellow-300 px-4 py-1.5 text-sm font-bold text-black shadow-lg hover:brightness-105" onClick={() => setShowMic(true)}><Icon name="micOff" size={16} />Mikrofon ist aus – einschalten</button>}
+                <div className={`pointer-events-none absolute left-4 top-2.5 flex items-center gap-3 ${voiceOn ? '' : 'hidden'}`}>
                   {together && <span className="rounded-full px-3 py-0.5 text-sm font-black text-black" style={{ background: who?.color }}>{who?.name}</span>}
                   <span data-testid={k === 0 ? 'live-state' : undefined} className={`font-black ${together ? 'text-lg' : 'text-xl sm:text-2xl'} ${color}`}>{label}</span>
                   {lv?.note && <span data-testid={k === 0 ? 'live-note' : undefined} className="rounded-full bg-white/10 px-3 py-0.5 font-mono text-sm font-bold">{lv.note}</span>}
