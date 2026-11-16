@@ -35,12 +35,12 @@ export class Mic {
     // Lautsprecher-Modus: Echo-Unterdrückung des Browsers filtert die eigene Musik aus dem Mikrofonsignal.
     // Kopfhörer-Modus: unbearbeitetes Signal – beste Tonhöhenerkennung.
     this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: speaker, noiseSuppression: speaker, autoGainControl: false, channelCount: 1 },
+      audio: { echoCancellation: speaker, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
       video: false,
     })
     this.src = ctx.createMediaStreamSource(this.stream)
     const hp = ctx.createBiquadFilter()
-    hp.type = 'highpass'; hp.frequency.value = speaker ? 140 : 90; hp.Q.value = 0.7
+    hp.type = 'highpass'; hp.frequency.value = speaker ? 100 : 80; hp.Q.value = 0.7
     const lp = ctx.createBiquadFilter()
     lp.type = 'lowpass'; lp.frequency.value = 3500
     this.analyser = ctx.createAnalyser()
@@ -72,7 +72,7 @@ export class Mic {
     this.analyser.getFloatTimeDomainData(this.raw)
     decimate(this.raw, this.factor, this.dec)
     const speaker = this.mode === 'speaker'
-    const r = this.yin.detect(this.dec, 0, speaker ? 0.1 : 0.15)
+    const r = this.yin.detect(this.dec, 0, speaker ? 0.15 : 0.18)
     // adaptiver Grundpegel: folgt leisen Phasen schnell, lauten nur sehr träge
     this.floor += (r.rms > this.floor ? 0.003 : 0.25) * (r.rms - this.floor)
     this.gate.feed(r.rms, expectSilence)

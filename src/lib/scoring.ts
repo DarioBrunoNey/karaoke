@@ -42,6 +42,8 @@ export class ScoreSession {
   private phrases: Phrase[]
   private refCount = 0
   readonly tol: (typeof LEVELS)[Difficulty]
+  /** 1 = dieser Frame gehört zu einer sehr kurzen Note (Sprechgesang, nur Rhythmus zählt) */
+  readonly short: Uint8Array
 
   constructor(melody: Melody, firstLyric = 0, level: Difficulty = 'mittel') {
     this.tol = LEVELS[level]
@@ -51,6 +53,19 @@ export class ScoreSession {
     const cut = Math.max(0, Math.floor((firstLyric - 1) * this.fps))
     for (let i = 0; i < cut && i < this.ref.length; i++) this.ref[i] = 0
     this.user = new Float32Array(this.ref.length).fill(-1)
+    // Sehr kurze Noten (< 0,2 s) sind Sprechgesang: Kein Mensch trifft dabei jede Silbe auf den Halbton.
+    // Dort zählt – wie bei Rap-Noten in Karaoke-Spielen – der Rhythmus: zur richtigen Zeit einen Ton von sich geben.
+    this.short = new Uint8Array(this.ref.length)
+    const minLen = Math.round(0.2 * this.fps)
+    for (let i = 0; i < this.ref.length; ) {
+      if (this.ref[i] <= 0) { i++; continue }
+      let j = i
+      // eine Note läuft, solange der Ton ohne Lücke und ohne Sprung weitergeht (Vibrato ist kein Sprung)
+      j++
+      while (j < this.ref.length && this.ref[j] > 0 && Math.abs(this.ref[j] - this.ref[j - 1]) < 0.8) j++
+      if (j - i < minLen) this.short.fill(1, i, j)
+      i = j
+    }
     this.phrases = findPhrases(this.ref, this.fps)
     for (let i = 0; i < this.ref.length; i++) if (this.ref[i] > 0) this.refCount++
   }
@@ -69,11 +84,26 @@ export class ScoreSession {
       for (let j = this.lastIdx + 1; j < i; j++) if (this.user[j] < 0) this.user[j] = prev
     }
     this.lastIdx = i
-    const target = this.refNear(i, 3)
-    if (!target) return 'none'
+    const k = this.nearIdx(i, 3)
+    if (k < 0) return 'none'
     if (midi <= 0) return 'silent'
-    const d = foldSemis(midi - target)
+    if (this.short[k]) return 'hit'
+    const d = foldSemis(midi - this.ref[k])
     return Math.abs(d) <= this.tol.hit ? 'hit' : d > 0 ? 'high' : 'low'
+  }
+
+  /** Index des nächstgelegenen Noten-Frames im Umkreis von w Frames, sonst −1 */
+  nearIdx(i: number, w: number): number {
+    for (let k = 0; k <= w; k++) {
+      if (i - k >= 0 && this.ref[i - k] > 0) return i - k
+      if (i + k < this.ref.length && this.ref[i + k] > 0) return i + k
+    }
+    return -1
+  }
+  /** Zählt dieser gesungene Ton an dieser Stelle als getroffen? (kurze Noten: jeder Ton; sonst nach Toleranz) */
+  isHit(i: number, midi: number, w = 4): boolean {
+    const k = this.nearIdx(i, w)
+    return k >= 0 && midi > 0 && (!!this.short[k] || Math.abs(foldSemis(midi - this.ref[k])) <= this.tol.hit)
   }
 
   refNear(i: number, w: number): number {
@@ -97,7 +127,7 @@ export class ScoreSession {
     for (let lag = -maxEarly; lag <= maxLate; lag++) {
       let c = 0
       for (let i = Math.max(0, -lag); i < n - Math.max(0, lag); i += 2) {
-        if (ref[i] <= 0) continue
+        if (ref[i] <= 0 || this.short[i]) continue
         const u = user[i + lag]
         if (u > 0 && Math.abs(foldSemis(u - ref[i])) <= hit) c++
       }
@@ -134,7 +164,7 @@ export class ScoreSession {
       if (ref[i] <= 0 || user[i] < 0) continue
       total++
       for (let j = Math.max(0, i - W); j <= Math.min(ref.length - 1, i + W); j++) {
-        if (user[j] > 0 && Math.abs(foldSemis(user[j] - ref[i])) <= this.tol.hit) { hit++; break }
+        if (user[j] > 0 && (this.short[i] || Math.abs(foldSemis(user[j] - ref[i])) <= this.tol.hit)) { hit++; break }
       }
     }
     return total >= 10 ? hit / total : null
@@ -153,7 +183,7 @@ export class ScoreSession {
       refRec++
       let best = 99
       for (let j = Math.max(0, i - W); j <= Math.min(n - 1, i + W); j++) {
-        if (user[j] > 0) best = Math.min(best, Math.abs(foldSemis(user[j] - ref[i])))
+        if (user[j] > 0) best = Math.min(best, this.short[i] ? 0 : Math.abs(foldSemis(user[j] - ref[i])))
       }
       if (best === 99) continue
       sung++

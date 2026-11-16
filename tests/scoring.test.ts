@@ -210,3 +210,19 @@ import { parseUltraStar, syllableProgress } from '../src/lib/ultrastar.ts'
   assert.equal(u.lines[0].text, 'für dich')
   console.log('Umlaute OK')
 }
+{
+  // Sprechgesang: Noten von 0,12 s mit kleinen Lücken, schnelle Tonwechsel
+  const mel = new Float32Array(fps * 40)
+  for (let i = fps * 2; i < mel.length; i++) { const k = Math.floor(i / 8); if (i % 8 < 6 && k % 12 < 9) mel[i] = 55 + ((k * 7) % 10) }
+  const run = (fn: (i: number) => number) => { const s = new ScoreSession({ fps, data: mel, source: 'stems' }); for (let i = 0; i < mel.length; i++) s.add(i / fps, fn(i)); return { r: s.result(), s } }
+  const spoken = run((i) => (mel[i] ? 50 + 3 * Math.sin(i / 7) : 0))      // spricht im Rhythmus, Tonhöhe egal
+  const mute = run(() => 0)
+  const farFromNotes = (i: number) => { for (let j = i - 8; j <= i + 8; j++) if (mel[j] > 0) return false; return true }
+  const wrongTime = run((i) => (i > fps * 2 && farFromNotes(i) ? 50 : 0)) // redet nur in den echten Pausen zwischen den Zeilen
+  console.log('Sprechgesang: im Rhythmus', spoken.r.total, JSON.stringify(spoken.r.parts), '| stumm', mute.r.total, '| nur in Pausen', wrongTime.r.total)
+  assert.ok(spoken.r.total >= 90, 'Rhythmus zählt bei kurzen Noten')
+  assert.equal(mute.r.total, 0)
+  assert.ok(wrongTime.r.total < 45)
+  assert.equal(spoken.s.estimateLag(), 0, 'kurze Noten verfälschen die Versatz-Erkennung nicht')
+  console.log('Sprechgesang OK')
+}
