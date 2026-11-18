@@ -9,11 +9,16 @@ const US = `#TITLE:Testlied\n#ARTIST:Die Tester\n#BPM:150\n#GAP:2000\n: 0 8 0 Er
 const NOTES = [[2, 60], [3, 62], [4, 64], [6, 65], [7, 64], [8, 62], [10, 60], [11, 62], [12, 60]]
 
 async function run(mode, shot) {
-  const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 }, serviceWorkers: 'block' })
+  // Modus „ipad": iPad mit Safari (meldet sich als Mac, hat aber einen Touchscreen)
+  const ctx = await browser.newContext(mode === 'ipad'
+    ? { viewport: { width: 1180, height: 820 }, hasTouch: true, serviceWorkers: 'block', userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15' }
+    : { viewport: { width: 1920, height: 1080 }, serviceWorkers: 'block' })
   const page = await ctx.newPage()
   const errors = [], calls = []
   let plays = 0, lists = 0, remoteStart = 0
   page.on('pageerror', (e) => errors.push(String(e)))
+  // echte iPads melden 5 Berührungspunkte; die Chromium-Nachbildung nur 1
+  if (mode === 'ipad') await page.addInitScript(() => Object.defineProperty(Navigator.prototype, 'maxTouchPoints', { get: () => 5 }))
   await page.addInitScript(({ mode, US, NOTES }) => {
     localStorage.setItem('encore-settings', JSON.stringify({ spotifyClientId: 'x'.repeat(32), micAsked: true, micMode: 'headphones' }))
     localStorage.setItem('encore-spotify-token', JSON.stringify({ access: 'tok', refresh: 'ref', exp: Date.now() + 3.6e6, clientId: 'x'.repeat(32) }))
@@ -49,7 +54,7 @@ async function run(mode, shot) {
     const u = route.request().url(); calls.push(route.request().method() + ' ' + u.replace('https://api.spotify.com/v1', ''))
     if (u.includes('/search')) return route.fulfill({ json: { tracks: { items: [track] } } })
     // Modus „ausweich": der Browser-Player wird von Spotify nie akzeptiert, aber die Spotify-App auf dem Handy ist erreichbar
-    if (mode === 'ausweich') {
+    if (mode === 'ausweich' || mode === 'ipad') {
       if (u.includes('/me/player/devices')) return route.fulfill({ json: { devices: [{ id: 'dev1', name: 'Encore Karaoke', type: 'Computer' }, { id: 'app1', name: 'Darios Handy', type: 'Smartphone', is_active: false }] } })
       if (u.includes('/me/player/play')) {
         if (!u.includes('device_id=app1')) return route.fulfill({ status: 404, json: { error: { status: 404, message: 'Device not found' } } })
@@ -154,7 +159,7 @@ async function run(mode, shot) {
   await page.getByPlaceholder('Bei Spotify suchen').fill('test')
   if (shot === 's4') { await page.getByLabel('Testlied mitsingen').waitFor(); await page.waitForTimeout(500); await page.screenshot({ path: 'tests/shots/n1-suche.png' }) }
   await page.getByLabel('Testlied mitsingen').click()
-  if (mode !== 'ausweich') await page.getByText('Erste Zeile').first().waitFor()
+  if (mode !== 'ausweich' && mode !== 'ipad') await page.getByText('Erste Zeile').first().waitFor()
   if (mode === 'duell') {
     await page.mouse.move(700, 300)
     await page.getByTestId('mode').click()
@@ -247,12 +252,13 @@ async function run(mode, shot) {
     await ctx.close()
     return out
   }
-  if (mode === 'ausweich') {
+  if (mode === 'ausweich' || mode === 'ipad') {
     const t0 = Date.now()
     const line = await page.getByText('Zweite Zeile').first().waitFor({ timeout: 25000 }).then(() => 'ok').catch(() => 'kein Text')
     const secs = Math.round((Date.now() - t0) / 1000)
     const toast = await page.getByText('Darios Handy').count()
-    const out = { mode, total: secs, pitch: 0, state: line, note: calls.some((c) => c.includes('device_id=app1')) ? 'ok' : 'nicht ausgewichen', errors, played: true }
+    const triedBrowser = calls.some((c) => c.startsWith('PUT /me/player/play?device_id=dev1'))
+    const out = { mode, total: secs, pitch: 0, state: line, note: calls.some((c) => c.includes('device_id=app1')) ? (mode === 'ipad' && triedBrowser ? 'iPad versuchte Browser-Wiedergabe' : 'ok') : 'nicht ausgewichen', errors, played: true }
     await ctx.close()
     return out
   }
@@ -278,7 +284,7 @@ async function run(mode, shot) {
   return res
 }
 
-const results = await Promise.all([run('frei', 's3'), run('melodie', 's4'), run('falsch'), run('auto', 's5'), run('duell'), run('handys'), run('mithoeren'), run('lobby'), run('zaeh'), run('spaeter'), run('ausweich')])
+const results = await Promise.all([run('frei', 's3'), run('melodie', 's4'), run('falsch'), run('auto', 's5'), run('duell'), run('handys'), run('mithoeren'), run('lobby'), run('zaeh'), run('spaeter'), run('ausweich'), run('ipad')])
 console.table(results.map(({ errors, ...r }) => r))
 const by = Object.fromEntries(results.map((r) => [r.mode, r]))
 const checks = [
@@ -296,6 +302,7 @@ const checks = [
   ['Spotify kennt das Gerät erst nicht: App meldet den Player neu an und startet trotzdem', by.zaeh.total >= 80 && by.zaeh.reconnects >= 2],
   ['Handy verbindet sich mitten im Song über den Mikrofon-Dialog: sein Besitzer singt sofort weiter', by.spaeter.state === 'ok' && by.spaeter.note === 'ok'],
   ['Browser-Player kommt nicht zustande: App weicht von selbst auf die Spotify-App aus (nach ' + by.ausweich.total + ' s läuft der Text)', by.ausweich.state === 'ok' && by.ausweich.note === 'ok' && by.ausweich.total <= 20],
+  ['iPad: Musik gleich über die Spotify-App, ohne Browser-Versuch (Text nach ' + by.ipad.total + ' s)', by.ipad.state === 'ok' && by.ipad.note === 'ok' && by.ipad.total <= 8],
   ['keine Browser-Fehler', results.every((r) => r.errors.length === 0)],
 ]
 for (const [n, ok] of checks) console.log(ok ? '✓' : '✗', n)

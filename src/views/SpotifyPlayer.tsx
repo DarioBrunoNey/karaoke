@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
-import { Icon, IS_TV, Modal, Stars, fmtTime } from '../ui'
+import { Icon, IS_IOS, IS_TV, Modal, Stars, fmtTime } from '../ui'
 import { lineAt } from '../lib/lrc'
 import { paintCountdown, secondsToEntry } from '../lib/countdown'
 import { midiToName } from '../lib/pitch'
@@ -165,7 +165,11 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
         return r
       }
       let t: Transport
-      if (mode === 'remote') t = await viaOther().catch(() => remoteTransport(track))
+      if (IS_IOS) {
+        // iPhone/iPad: Browser-Wiedergabe gibt es dort nicht – direkt die Spotify-App steuern
+        if (!others.length) throw new Error('Auf iPhone und iPad spielt Spotify nur über die Spotify-App.')
+        t = await viaOther()
+      } else if (mode === 'remote') t = await viaOther().catch(() => remoteTransport(track))
       else if (localStorage.getItem('encore-sp-weg') === 'remote' && others.length) {
         // hier hat zuletzt nur das andere Gerät funktioniert – gleich damit beginnen
         t = await viaOther().catch((e) => { if (fatal(e)) throw e; return viaBrowser(22000) })
@@ -531,7 +535,8 @@ export default function SpotifyPlayer({ track, profileId }: { track: SpTrack; pr
           <div className="glass max-w-xl p-8">
             <p className="text-2xl font-bold">Wiedergabe in diesem Browser nicht möglich</p>
             <p className="mt-2 text-white/65">{error}</p>
-            <p className="mt-2 text-white/65">So geht es sicher: Öffne die <b className="text-white">Spotify-App</b> auf diesem Gerät (oder auf Handy, Laptop, Fernseher), spiel dort kurz irgendeinen Song an und komm hierher zurück. Die Karaoke-App steuert dann die Spotify-App und zeigt hier Text und Noten.</p>
+            {IS_IOS ? <p className="mt-2 text-white/65">So geht es: Öffne die <b className="text-white">Spotify-App</b> auf diesem iPad, starte dort kurz irgendeinen Song und wechsle zurück hierher (die Musik weiterlaufen lassen). Dann „Erneut versuchen“ – die Karaoke-App übernimmt die Spotify-App und zeigt hier Text und Noten.</p> :
+            <p className="mt-2 text-white/65">So geht es sicher: Öffne die <b className="text-white">Spotify-App</b> auf diesem Gerät (oder auf Handy, Laptop, Fernseher), spiel dort kurz irgendeinen Song an und komm hierher zurück. Die Karaoke-App steuert dann die Spotify-App und zeigt hier Text und Noten.</p>}
             <a className="btn mt-4" href="https://open.spotify.com" target="_blank" rel="noreferrer">Spotify öffnen</a>
             <div className="mt-6 flex flex-wrap justify-center gap-3">
               <button className="btn-primary" onClick={() => void start('remote')}>Auf anderem Spotify-Gerät abspielen</button>
